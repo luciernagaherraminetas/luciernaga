@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Admin – Luciérnaga-prueba</title>
+
+<style>
+body{
+  font-family:Arial,sans-serif;
+  background:#0f172a;
+  color:#e5e7eb;
+  padding:30px;
+}
+
+table{
+  width:100%;
+  border-collapse:collapse;
+  margin-top:20px;
+  background:#020617;
+}
+
+th,td{
+  padding:10px;
+  border-bottom:1px solid #1e293b;
+  text-align:left;
+  vertical-align:middle;
+}
+
+th{
+  color:#22c55e;
+  font-size:13px;
+  text-transform:uppercase;
+}
+
+.badge{
+  background:#22c55e;
+  color:#022c22;
+  padding:4px 8px;
+  border-radius:6px;
+  font-size:12px;
+  font-weight:bold;
+}
+
+.topbar{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:25px;
+}
+
+.topbar a{
+  color:#38bdf8;
+  text-decoration:none;
+  margin-left:18px;
+  font-weight:bold;
+  font-size:14px;
+}
+
+.topbar a:hover{
+  text-decoration:underline;
+}
+
+.menu{
+  display:flex;
+  gap:20px;
+  align-items:center;
+  flex-wrap:wrap;
+}
+
+.menu a{
+  color:#38bdf8;
+  text-decoration:none;
+  font-weight:bold;
+  font-size:15px;
+}
+
+.menu a:hover{
+  color:#facc15;
+}
+
+.payment-id{
+  font-family:monospace;
+  font-size:13px;
+  color:#93c5fd;
+}
+
+.resumen-box{
+  background:#020617;
+  padding:15px;
+  border-radius:10px;
+  margin-bottom:20px;
+}
+
+.resumen-box h3{
+  margin:0 0 10px 0;
+  color:#facc15;
+}
+
+.btn-delete{
+  display:inline-block;
+  background:#7f1d1d;
+  color:#fecaca;
+  padding:6px 10px;
+  border-radius:6px;
+  text-decoration:none;
+  font-size:14px;
+  transition:0.2s ease;
+}
+
+.btn-delete:hover{
+  background:#dc2626;
+  color:white;
+  transform:scale(1.05);
+}
+
+</style>
+</head>
+
+<body>
+
+<div class="menu">
+
+    <a href="/admin">📊 Dashboard</a>
+
+    <a href="/admin/albums">📸 Albums</a>
+
+    <a href="/admin/pagos">💰 Pagos</a>
+
+    <a href="/admin/instalaciones">📱 Instalaciones</a>
+
+    <a href="/admin/notificaciones">🔔 Notificaciones</a>
+
+    <a href="/admin/logout">🚪 Salir</a>
+
+</div>
+
+{% block content %}
+
+{% if pagos is defined %}
+
+<!-- 🔥 RESUMEN GENERAL -->
+<p>
+  Total pagos: <strong>{{ total_pagos }}</strong> ·
+  Total fotos vendidas: <strong>{{ total_fotos }}</strong>
+</p>
+
+{% if resumen %}
+<div class="resumen-box">
+  <h3>Resumen por álbum</h3>
+  <ul>
+    {% for evento, total_p, total_f in resumen %}
+      <li>
+        <strong>{{ evento }}</strong> →
+        {{ total_p }} pagos ·
+        {{ total_f or 0 }} fotos
+      </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<table>
+<thead>
+<tr>
+  <th>Payment ID</th>
+  <th>Email</th>
+  <th>Fotos</th>
+  <th>Monto</th>
+  <th>Fecha</th>
+  <th>Detalle</th>
+  <th>Acción</th>
+  <th>Eliminar</th>
+  <th>ZIP</th>
+</tr>
+</thead>
+
+<tbody>
+{% for p in pagos %}
+<tr>
+
+<td class="payment-id" title="{{ p.payment_id }}">
+  {{ p.payment_id[:18] }}...{{ p.payment_id[-6:] }}
+</td>
+
+<td>{{ p.email or "—" }}</td>
+
+<td>
+  <span class="badge">{{ p.fotos|length }}</span>
+</td>
+
+<td>
+  {{ len(p.fotos) * (p.precio_unitario or PRECIO_FOTO) }}
+</td>
+
+<td>
+  <small>{{ p.created_at | int | datetimeformat }}</small>
+</td>
+
+<td>
+    <!-- Nueva acción para reenviar link -->
+    <button class="btn" id="copy-link-{{ p.id }}" onclick="copyLink('{{ p.token }}')">
+      📤 Reenviar Link
+    </button>
+  </td>
+
+<td>
+  <a href="/admin/ver-pago/{{ p.id }}">👁 Ver</a>
+</td>
+
+<td>
+  {% if p.descargado %}
+    <span style="color:#f87171;">Descargado</span>
+  {% else %}
+    <a href="/admin/zip/{{ p.token }}" target="_blank">⬇ ZIP</a>
+  {% endif %}
+</td>
+
+<td>
+  <a href="/admin/delete-pago/{{ p.id }}"
+     class="btn-delete"
+     onclick="return confirm('⚠️ ¿Seguro que deseas eliminar este pago? Esta acción no se puede deshacer.')">
+     🗑
+  </a>
+</td>
+
+</tr>
+{% endfor %}
+</tbody>
+</table>
+
+{% endif %}
+
+{% endblock %}
+
+</table>
+
+<script>
+function copyLink(token) {
+  const link = "https://app.luciernaga.site/descargar/" + token;
+
+  navigator.clipboard.writeText(link).then(function() {
+    alert("✅ Link copiado:\n" + link);
+  }, function() {
+    alert("No se pudo copiar el link");
+  });
+}
+</script>
+
+</body>
+</html>

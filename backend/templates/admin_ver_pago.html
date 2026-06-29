@@ -1,0 +1,48 @@
+{% extends "admin.html" %}
+{% block content %}
+
+<h2>🧾 Detalle del pago</h2>
+
+<div style="margin-bottom:20px;">
+  <strong>Email:</strong> {{ pago.email }} <br>
+  <strong>Fecha:</strong> {{ pago.created_at | int | datetimeformat }} <br>
+  <strong>Fotos compradas:</strong> {{ pago.fotos|length }}
+</div>
+
+<hr style="margin:20px 0; opacity:.2;">
+
+<h3>📷 Fotos compradas</h3>
+
+{% if pago.fotos and pago.fotos|length > 0 %}
+<div style="display:flex; flex-wrap:wrap; gap:15px;">
+
+  {% for foto in pago.fotos %}
+  <div style="text-align:center;">
+    <img src="/static/fotos_evento/{{ pago.evento }}/preview/{{ foto }}"
+         style="width:200px; border-radius:8px;">
+    <div style="font-size:12px; margin-top:5px; opacity:.7;">
+      {{ foto }}
+    </div>
+  </div>
+  {% endfor %}
+
+</div>
+{% else %}
+<p>No hay fotos registradas.</p>
+{% endif %}
+
+<br><br>
+
+<a href="/admin" style="
+  display:inline-block;
+  padding:8px 14px;
+  background:#0f766e;
+  color:#fff;
+  border-radius:6px;
+  text-decoration:none;
+  font-weight:bold;
+">
+⬅ Volver
+</a>
+
+{% endblock %}

@@ -1,0 +1,58 @@
+{% extends "admin.html" %}
+{% block content %}
+
+<h2>💲 Cambiar precio</h2>
+
+<p>
+Evento:
+<strong>{{ album.nombre }}</strong>
+</p>
+
+<form method="POST">
+
+<label>Precio por foto</label>
+
+<br><br>
+
+<input
+ type="number"
+ step="1"
+ name="precio"
+ value="{{ album.precio }}"
+ required
+ style="
+   padding:10px;
+   width:220px;
+   border-radius:8px;
+   border:none;
+ "
+>
+
+<br><br>
+
+<button
+ type="submit"
+ style="
+   background:#22c55e;
+   color:black;
+   border:none;
+   padding:10px 18px;
+   border-radius:8px;
+   font-weight:bold;
+   cursor:pointer;
+ ">
+Guardar precio
+</button>
+
+<a href="/admin/albums"
+   style="
+      margin-left:15px;
+      color:#38bdf8;
+      text-decoration:none;
+   ">
+Cancelar
+</a>
+
+</form>
+
+{% endblock %}

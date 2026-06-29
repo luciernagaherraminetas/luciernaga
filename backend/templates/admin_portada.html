@@ -1,0 +1,48 @@
+{% extends "admin.html" %}
+{% block content %}
+
+<h2>🖼 Cambiar portada</h2>
+
+<p>
+Evento:
+<strong>{{ album.nombre }}</strong>
+</p>
+
+<form method="POST"
+      enctype="multipart/form-data">
+
+    <p>
+        Selecciona una nueva imagen para la portada.
+    </p>
+
+    <input type="file"
+           name="portada"
+           accept="image/*"
+           required>
+
+    <br><br>
+
+    <button type="submit"
+            style="
+                padding:10px 18px;
+                background:#22c55e;
+                border:none;
+                border-radius:6px;
+                font-weight:bold;
+                cursor:pointer;
+            ">
+        💾 Guardar portada
+    </button>
+
+    <a href="/admin/albums"
+       style="
+            margin-left:15px;
+            color:#38bdf8;
+            text-decoration:none;
+       ">
+        Cancelar
+    </a>
+
+</form>
+
+{% endblock %}

@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Pago aprobado</title>
+
+<style>
+body{
+  font-family:Arial,sans-serif;
+  background:#0f172a;
+  color:#e5e7eb;
+  text-align:center;
+  padding:60px;
+}
+
+h1{
+  color:#22c55e;
+  font-size:36px;
+}
+
+p{
+  font-size:18px;
+  margin-top:15px;
+}
+
+.box{
+  background:#020617;
+  padding:35px;
+  border-radius:14px;
+  margin-top:30px;
+  display:inline-block;
+  max-width:520px;
+  box-shadow:0 0 40px rgba(0,0,0,.4);
+}
+
+.btn{
+  display:inline-block;
+  margin-top:25px;
+  padding:15px 24px;
+  background:#22c55e;
+  color:#022c22;
+  text-decoration:none;
+  font-weight:bold;
+  border-radius:10px;
+  font-size:16px;
+  transition:.2s;
+}
+
+.btn:hover{
+  background:#16a34a;
+  transform:translateY(-2px);
+}
+
+.small{
+  margin-top:20px;
+  color:#94a3b8;
+  font-size:14px;
+}
+
+.count{
+  margin-top:10px;
+  font-size:16px;
+  color:#facc15;
+}
+</style>
+</head>
+
+<body>
+
+<h1>✅ Pago aprobado</h1>
+
+<p>Gracias por tu compra 🎉</p>
+
+<div class="box">
+
+  {% if fotos %}
+  <div class="count">
+    Compraste <strong>{{ fotos }}</strong> foto(s)
+  </div>
+  {% endif %}
+
+  {% if token %}
+  <a href="/descargar/{{ token }}" target="_blank">
+    ⬇ Descargar mis fotos
+  </a>
+
+  <div class="small">
+    ⏱ Este enlace expira en 24 horas
+  </div>
+  {% else %}
+  <div class="small" style="color:#f87171;">
+    Hubo un problema generando tu enlace.
+    Si el pago fue aprobado, contáctanos.
+  </div>
+  {% endif %}
+
+</div>
+
+</body>
+</html>

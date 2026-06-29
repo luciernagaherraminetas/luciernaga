@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Login Admin – Luciérnaga</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body {
+    background:#020617;
+    font-family:Arial, sans-serif;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    height:100vh;
+    color:#e5e7eb;
+}
+
+form {
+    background:#020617;
+    padding:30px;
+    border-radius:10px;
+    width:320px;
+    border:1px solid #1e293b;
+}
+
+h2 {
+    margin-bottom:20px;
+    text-align:center;
+}
+
+input {
+    width:100%;
+    padding:10px;
+    margin:10px 0;
+    background:#020617;
+    border:1px solid #1e293b;
+    color:#e5e7eb;
+    border-radius:6px;
+}
+
+button {
+    width:100%;
+    padding:10px;
+    background:#22c55e;
+    border:none;
+    border-radius:6px;
+    font-weight:bold;
+    cursor:pointer;
+}
+
+button:hover {
+    opacity:0.9;
+}
+
+.error {
+    color:#ef4444;
+    margin-bottom:12px;
+    text-align:center;
+    font-size:14px;
+}
+</style>
+</head>
+
+<body>
+
+<form method="POST" action="/admin/login" autocomplete="off">
+    <h2>🔐 Admin Login</h2>
+
+    {% if error %}
+        <div class="error">{{ error }}</div>
+    {% endif %}
+
+    <input
+        type="text"
+        name="usuario"
+        placeholder="Usuario"
+        required
+        autofocus
+    >
+
+    <input
+        type="password"
+        name="password"
+        placeholder="Contraseña"
+        required
+    >
+
+    <button type="submit">Entrar</button>
+</form>
+
+</body>
+</html>

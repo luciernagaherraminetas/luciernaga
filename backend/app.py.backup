@@ -1,0 +1,237 @@
+from flask import (
+    Flask, render_template, request, jsonify,
+    redirect, url_for, session, send_file, abort
+)
+import mercadopago
+import os
+import json
+import time
+import secrets
+import zipfile
+import tempfile
+import smtplib
+from email.message import EmailMessage
+from functools import wraps
+from datetime import datetime, timedelta
+from dotenv import load_dotenv
+from PIL import Image
+
+# ==========================
+# APP
+# ==========================
+app = Flask(__name__)
+app.secret_key = "luciernaga_super_secret_key"
+
+load_dotenv()
+
+# ==========================
+# PATHS
+# ==========================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+DATA_DIR = os.path.join(BASE_DIR, "data")
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+FOTOS_DIR = os.path.join(STATIC_DIR, "fotos_evento")
+
+os.makedirs(DATA_DIR, exist_ok=True)
+
+EVENTOS_FILE = os.path.join(DATA_DIR, "eventos.json")
+PAGOS_FILE = os.path.join(DATA_DIR, "pagos.json")
+VISITAS_FILE = os.path.join(DATA_DIR, "visitas.json")
+
+# ==========================
+# CONFIG
+# ==========================
+PRECIO_FOTO = 70.0
+DESCARGA_HORAS = 48  # ⏱️ duración de links
+
+# ==========================
+# MERCADO PAGO (PRODUCCIÓN)
+# ==========================
+sdk = mercadopago.SDK(os.getenv("MP_ACCESS_TOKEN"))
+
+# ==========================
+# EMAIL
+# ==========================
+EMAIL_REMITENTE = "jmanuelphotographe@gmail.com"
+EMAIL_PASSWORD = "otghoylttvyvqxsg"
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
+
+# ==========================
+# ADMIN
+# ==========================
+ADMIN_USER = "luciernaga"
+ADMIN_PASS = "manolo86"
+
+# ==========================
+# UTILIDADES
+# ==========================
+def load_json(path):
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r") as f:
+            c = f.read().strip()
+            return json.loads(c) if c else {}
+    except Exception:
+        return {}
+
+def save_json(path, data):
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+
+def evento_activo():
+    eventos = load_json(EVENTOS_FILE)
+    for slug, e in eventos.items():
+        if e.get("activo"):
+            return slug, e
+    return None, None
+
+# ==========================
+# WEBHOOK (BLINDADO)
+# ==========================
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    try:
+        data = request.get_json(silent=True) or {}
+
+        if data.get("test"):
+            return jsonify({"ok": True}), 200
+
+        payment_id = (
+            data.get("data", {}).get("id")
+            or data.get("id")
+            or request.args.get("id")
+        )
+
+        if not payment_id:
+            return jsonify({"ok": True}), 200
+
+        pago_mp = sdk.payment().get(payment_id)
+        info = pago_mp.get("response", {})
+
+        if info.get("status") != "approved":
+            return jsonify({"ok": True}), 200
+
+        pagos = load_json(PAGOS_FILE)
+        if str(payment_id) in pagos:
+            return jsonify({"ok": True}), 200
+
+        fotos = info.get("external_reference", "").split(",")
+        email = info.get("payer", {}).get("email")
+
+        token = secrets.token_urlsafe(32)
+        expira = int((datetime.utcnow() + timedelta(hours=DESCARGA_HORAS)).timestamp())
+
+        pagos[str(payment_id)] = {
+            "email": email,
+            "fotos": fotos,
+            "token": token,
+            "expira": expira
+        }
+
+        save_json(PAGOS_FILE, pagos)
+
+        # 📧 Email con links
+        links = "\n".join(
+            f"https://app.luciernaga.site/descargar/{token}/{f}"
+            for f in fotos
+        )
+
+        msg = EmailMessage()
+        msg["Subject"] = "📸 Tus fotos – Luciérnaga"
+        msg["From"] = EMAIL_REMITENTE
+        msg["To"] = email
+        msg.set_content(
+            f"Gracias por tu compra.\n\n"
+            f"Tus enlaces (válidos {DESCARGA_HORAS}h):\n\n{links}"
+        )
+
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+            server.starttls()
+            server.login(EMAIL_REMITENTE, EMAIL_PASSWORD)
+            server.send_message(msg)
+
+        return jsonify({"ok": True}), 200
+
+    except Exception as e:
+        print("❌ WEBHOOK ERROR:", e)
+        return jsonify({"ok": True}), 200
+
+# ==========================
+# DESCARGA SEGURA
+# ==========================
+@app.route("/descargar/<token>/<foto>")
+def descargar_foto(token, foto):
+    pagos = load_json(PAGOS_FILE)
+    ahora = int(time.time())
+
+    pago = next((p for p in pagos.values() if p.get("token") == token), None)
+    if not pago:
+        abort(403)
+
+    if ahora > pago["expira"]:
+        return "⏳ Enlace expirado", 403
+
+    if foto not in pago["fotos"]:
+        abort(403)
+
+    slug, evento = evento_activo()
+    ruta = os.path.join(
+        FOTOS_DIR, evento["carpeta"], "originales", foto
+    )
+
+    if not os.path.exists(ruta):
+        abort(404)
+
+    return send_file(ruta, as_attachment=True)
+
+# ==========================
+# CREAR PREFERENCIA
+# ==========================
+@app.route("/crear-preferencia", methods=["POST"])
+def crear_preferencia():
+    data = request.get_json()
+    fotos = data.get("seleccionadas", [])
+
+    items = [{
+        "title": f"Foto deportiva {f}",
+        "quantity": 1,
+        "currency_id": "MXN",
+        "unit_price": PRECIO_FOTO
+    } for f in fotos]
+
+    pref = sdk.preference().create({
+        "items": items,
+        "external_reference": ",".join(fotos),
+        "notification_url": "https://app.luciernaga.site/webhook",
+        "back_urls": {
+            "success": "https://app.luciernaga.site/",
+            "failure": "https://app.luciernaga.site/",
+            "pending": "https://app.luciernaga.site/"
+        },
+        "auto_return": "approved"
+    })
+
+    return jsonify({"init_point": pref["response"]["init_point"]})
+
+# ==========================
+# HOME
+# ==========================
+@app.route("/")
+def index():
+    slug, evento = evento_activo()
+    if not evento:
+        return "No hay evento activo", 503
+
+    preview = os.path.join(FOTOS_DIR, evento["carpeta"], "preview")
+    fotos = sorted(os.listdir(preview)) if os.path.exists(preview) else []
+
+    return render_template("index.html", fotos=fotos, evento=evento)
+
+# ==========================
+# MAIN
+# ==========================
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)

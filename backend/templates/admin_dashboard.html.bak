@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard Admin</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <style>
+        body {
+            background: #020617;
+            color: #e5e7eb;
+            font-family: Arial, sans-serif;
+            padding: 30px;
+        }
+        h1 { color: #22c55e; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            padding: 14px;
+            border-bottom: 1px solid #1e293b;
+            text-align: left;
+        }
+        th { color: #22c55e; }
+        .btn {
+            padding: 8px 14px;
+            background: #22c55e;
+            color: #022c22;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: bold;
+            border: none;
+            cursor: pointer;
+        }
+        .btn-blue {
+            background:#2563eb;
+            color:white;
+        }
+        .btn-red {
+            background:red;
+            color:white;
+        }
+    </style>
+</head>
+<body>
+
+<h1>Eventos</h1>
+
+<div style="margin:20px 0;">
+  <a href="{{ url_for('admin_new_album') }}" class="btn">
+    ➕ Subir Álbum
+  </a>
+  <a href="{{ url_for('admin_pagos') }}" class="btn btn-blue" style="margin-left:10px;">
+    💳 Ver todos los pagos
+  </a>
+</div>
+
+{% if eventos %}
+<table>
+  <thead>
+    <tr>
+      <th>Slug</th>
+      <th>Nombre</th>
+      <th>Carpeta</th>
+      <th>Estado</th>
+      <th>Ingresos</th>
+      <th>Acciones</th>
+    </tr>
+  </thead>
+
+  <tbody>
+    {% for slug, evento in eventos.items() %}
+    <tr>
+      <td>{{ slug }}</td>
+      <td>{{ evento.nombre }}</td>
+      <td>{{ evento.carpeta }}</td>
+
+      <td>
+        {% if evento.activo %}
+          🟢 Activo
+        {% else %}
+          ⚪ Inactivo
+        {% endif %}
+        <div style="font-size:12px;color:#94a3b8;">
+          👁 {{ evento.visitas or 0 }} visitas
+        </div>
+      </td>
+
+      <td>
+        💰 ${{ resumen.get(slug, {}).get("total", 0) }} MXN<br>
+        📦 {{ resumen.get(slug, {}).get("ventas", 0) }} ventas<br>
+        📸 {{ resumen.get(slug, {}).get("fotos", 0) }} fotos
+      </td>
+
+      <td>
+        <form action="{{ url_for('toggle_album', slug=slug) }}" method="POST" style="display:inline;">
+          <button class="btn">Activar</button>
+        </form>
+
+        <a href="{{ url_for('admin_evento', slug=slug) }}" class="btn">
+          Ver
+        </a>
+
+        <a href="{{ url_for('admin_pagos_evento', slug=slug) }}" class="btn btn-blue">
+          💳 Pagos
+        </a>
+
+        <form
+          action="{{ url_for('delete_album', slug=slug) }}"
+          method="POST"
+          style="display:inline;"
+          onsubmit="return confirm('¿Eliminar este evento?')"
+        >
+          <button class="btn btn-red">🗑 Eliminar</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% else %}
+<p style="margin-top:20px;color:#aaa;">
+  No hay eventos registrados
+</p>
+{% endif %}
+
+</body>
+</html>
+

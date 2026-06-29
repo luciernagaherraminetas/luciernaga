@@ -1,0 +1,101 @@
+                        )
+
+                        draw = ImageDraw.Draw(overlay)
+
+                        texto = "LUCIERNAGA"
+
+                        font_size = int(img.width / 20)
+
+                        try:
+                            font = ImageFont.truetype(
+                                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                                font_size
+                            )
+                        except:
+                            font = ImageFont.load_default()
+
+                        for y in range(-100, img.height, int(font_size * 9)):
+                            for x in range(-100, img.width, int(font_size * 11)):
+                                draw.text(
+                                    (x, y),
+                                    "LUCIERNAGA",
+                                    font=font,
+                                    fill=(255,255,255,40)
+                                )
+
+                    img = Image.alpha_composite(img, overlay)
+
+                    overlay_logo = Image.new(
+                        "RGBA",
+                        img.size,
+                        (255,255,255,0)
+                    )
+
+                    logo_size = int(img.width * 0.05)
+
+                    logo_repeat = watermark.resize(
+                        (
+                            logo_size,
+                            int(
+                                watermark.height *
+                                logo_size /
+                                watermark.width
+                            )
+                        ),
+                        Image.LANCZOS
+                    )
+
+                    for y in range(-150, img.height + 150, int(font_size * 4)):
+                        for x in range(-150, img.width + 150, int(font_size * 5)):
+
+                            logo = logo_repeat.copy()
+
+                            alpha = logo.split()[3]
+                            alpha = alpha.point(lambda p: p * 0.20)
+
+                            logo.putalpha(alpha)
+
+                            overlay_logo.alpha_composite(
+                                logo,
+                                (
+                                    x + int(font_size * 2),
+                                    y + int(font_size * 2)
+                                )
+                            )
+
+                    img = Image.alpha_composite(
+                        img,
+                        overlay_logo
+                    )
+
+                    img.convert("RGB").save(
+                        prev_path,
+                        format="JPEG",
+                        quality=50
+                    )
+
+                    fotos_count += 1
+
+                    except Exception as e:
+                        print(e)
+
+        finally:
+
+            if os.path.exists(temp_zip):
+                os.remove(temp_zip)
+
+        albums[slug]["fotos"] = fotos_count
+        save_albums(albums)
+
+        return redirect("/admin/albums")
+
+    return render_template(
+        "admin_agregar_fotos.html",
+        slug=slug,
+        album=albums[slug]
+    )
+
+@app.route("/admin/albums/delete/<slug>", methods=["POST"])
+@admin_required
+def delete_album(slug):
+

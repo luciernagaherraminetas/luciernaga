@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Pagos – {{ evento.nombre }}</title>
+<style>
+body {
+    background:#020617;
+    color:#e5e7eb;
+    font-family:Arial;
+    padding:30px;
+}
+table {
+    width:100%;
+    border-collapse:collapse;
+}
+th, td {
+    padding:12px;
+    border-bottom:1px solid #1e293b;
+}
+th {
+    color:#22c55e;
+}
+.btn {
+    background:#22c55e;
+    color:#022c22;
+    padding:6px 10px;
+    border-radius:6px;
+    text-decoration:none;
+    font-weight:bold;
+}
+.volver {
+    display:inline-block;
+    margin-bottom:20px;
+    background:#0f766e;
+    color:#ecfeff;
+    padding:8px 14px;
+    border-radius:8px;
+    text-decoration:none;
+    font-weight:bold;
+}
+</style>
+</head>
+
+<body>
+
+<a href="/admin/dashboard" class="volver">⬅ Volver al panel</a>
+
+<h1>💳 Pagos – {{ evento.nombre }}</h1>
+
+{% if pagos %}
+<table>
+<thead>
+<tr>
+    <th>ID Pago</th>
+    <th>Email</th>
+    <th>Fotos</th>
+    <th>Fecha</th>
+    <th>Acción</th>
+</tr>
+</thead>
+<tbody>
+{% for payment_id, p in pagos.items() %}
+<tr>
+    <td>{{ payment_id }}</td>
+    <td>{{ p.email }}</td>
+    <td>{{ p.fotos|length }}</td>
+    <td>{{ p.timestamp }}</td>
+    <td>
+        <a class="btn" href="/admin/reenviar/{{ payment_id }}">
+            Reenviar
+        </a>
+    </td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% else %}
+<p>❌ No hay pagos para este evento</p>
+{% endif %}
+
+</body>
+</html>
+

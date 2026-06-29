@@ -1,0 +1,11 @@
+{
+  "arrecife": {
+    "nombre": "Medio Maraton Arrecife",
+    "lugar": "boca del rio",
+    "fecha": "2026-06-28",
+    "precio": 110.0,
+    "activo": false,
+    "fotos": 0,
+    "vistas": 0
+  }
+}

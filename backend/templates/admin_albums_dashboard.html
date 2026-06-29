@@ -1,0 +1,245 @@
+{% extends "admin.html" %}
+{% block content %}
+
+<style>
+
+.dropdown{
+position:relative;
+display:inline-block;
+}
+
+.dropbtn{
+background:#111827;
+color:white;
+border:none;
+padding:8px 12px;
+border-radius:8px;
+cursor:pointer;
+font-weight:bold;
+}
+
+.dropdown-content{
+display:none;
+position:absolute;
+top:35px;
+right:0;
+background:#1e293b;
+min-width:220px;
+border-radius:10px;
+z-index:99999;
+box-shadow:0 10px 25px rgba(0,0,0,.4);
+}
+
+.dropdown-content a{
+display:block;
+padding:12px;
+color:white;
+text-decoration:none;
+}
+
+.dropdown-content form{
+margin:0;
+}
+
+.dropdown-content a:hover{
+background:#334155;
+}
+
+.delete-btn{
+width:100%;
+text-align:left;
+background:none;
+border:none;
+padding:12px;
+color:#f87171;
+cursor:pointer;
+font-size:14px;
+}
+
+.delete-btn:hover{
+background:#334155;
+}
+
+</style>
+
+<div style="
+display:flex;
+justify-content:space-between;
+align-items:center;
+margin-bottom:30px;
+">
+
+  <h1 style="margin:0;">
+  📸 ALBUMS
+  </h1>
+
+  <a href="/admin/albums/new"
+  style="
+  padding:12px 20px;
+  background:#22c55e;
+  color:#000;
+  border-radius:10px;
+  text-decoration:none;
+  font-weight:bold;
+  font-size:18px;
+  ">
+  ➕ Agregar álbum
+  </a>
+
+</div>
+
+<table style="width:100%; border-collapse:collapse;">
+  <thead>
+    <tr>
+      <th>EVENTO</th>
+      <th>PRECIO</th>
+      <th>LUGAR</th>
+      <th>FOTOS</th>
+      <th>VISTAS</th>
+      <th>VENDIDAS</th>
+      <th>INGRESOS</th>
+      <th>ESTADO</th>
+      <th>ACCIONES</th>
+    </tr>
+  </thead>
+
+  <tbody>
+    {% if albums and albums|length > 0 %}
+      {% for slug, album in albums.items() %}
+      <tr>
+        <td>{{ album.nombre }}</td>
+        <td>${{ album.precio }}</td>
+        <td>{{ album.lugar }}</td>
+        <td>{{ album.fotos }}</td>
+        <td>{{ album.vistas }}</td>
+        <td>
+          {{ resumen_ventas[slug].fotos_vendidas }}
+        </td>
+
+        <td>
+          ${{ resumen_ventas[slug].total_dinero | round(2) }}
+        </td>
+        <td>
+          {% if album.activo %}
+            <span style="color:#22c55e;">🟢 Activo</span>
+          {% else %}
+            <span style="color:#f87171;">🔴 Inactivo</span>
+          {% endif %}
+        </td>
+
+        <td>
+
+        <div class="dropdown">
+
+        <button
+        class="dropbtn"
+        onclick="toggleMenu(this)"
+        type="button">
+        Acciones ▼
+        </button>
+
+        <div class="dropdown-content">
+
+        <a href="#"
+        onclick="
+        navigator.clipboard.writeText(
+        'https://app.luciernaga.site/evento/{{ slug }}'
+        );
+        alert('Link copiado');
+        return false;
+        ">
+        🔗 Compartir evento
+        </a>
+
+        <a href="/admin/albums/preview/{{ slug }}"
+           target="_blank">
+        👁 Ver álbum
+        </a>
+
+        <a href="/admin/albums/precio/{{ slug }}">
+        💲 Cambiar precio
+        </a>
+
+        <a href="/admin/albums/portada/{{ slug }}">
+        🖼 Cambiar portada
+        </a>
+
+        <a href="/admin/albums/agregar-fotos/{{ slug }}">
+        📸 Agregar fotos
+        </a>
+
+        <a href="/admin/albums/toggle/{{ slug }}">
+        {% if album.activo %}
+        🔴 Desactivar
+        {% else %}
+        🟢 Activar
+        {% endif %}
+        </a>
+
+        <form action="/admin/albums/delete/{{ slug }}"
+              method="POST"
+              onsubmit="return confirm('⚠️ Esto eliminará el álbum y TODAS sus fotos. ¿Seguro?')">
+
+        <button type="submit" class="delete-btn">
+        🗑 Eliminar
+        </button>
+
+        </form>
+
+        </div>
+
+        </div>
+
+        </td>
+      </tr>
+      {% endfor %}
+    {% else %}
+      <tr>
+        <td colspan="6" style="text-align:center; padding:20px; opacity:.7;">
+          No hay álbumes todavía
+        </td>
+      </tr>
+    {% endif %}
+  </tbody>
+</table>
+
+<script>
+
+document.addEventListener("click", function(e){
+
+document
+.querySelectorAll(".dropdown-content")
+.forEach(menu => {
+
+if(
+!menu.parentElement.contains(e.target)
+){
+menu.style.display="none"
+}
+
+})
+
+})
+
+function toggleMenu(btn){
+
+const menu =
+btn.parentElement.querySelector(
+".dropdown-content"
+)
+
+const visible =
+menu.style.display === "block"
+
+document
+.querySelectorAll(".dropdown-content")
+.forEach(m => m.style.display="none")
+
+menu.style.display =
+visible ? "none" : "block"
+
+}
+
+</script>
+
+{% endblock %}

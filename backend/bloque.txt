@@ -1,0 +1,122 @@
+    try:
+        with zipfile.ZipFile(temp_zip, "r") as zip_ref:
+            for member in zip_ref.infolist():
+
+                if member.is_dir():
+                    continue
+
+                base = secure_filename(os.path.basename(member.filename))
+                if not base or not allowed_file(base):
+                    continue
+
+                name, _ = os.path.splitext(base)
+                filename = f"{name}_{fotos_count}.jpg"
+
+                try:
+                    with zip_ref.open(member) as file:
+                        img = Image.open(file).convert("RGBA")
+
+                    orig_path = os.path.join(originals, filename)
+                    prev_path = os.path.join(previews, filename)
+
+                    # guardar original
+                    img.convert("RGB").save(orig_path, format="JPEG", quality=92)
+
+                    # generar preview
+                    preview = img.copy()
+                    preview.thumbnail((MAX_PREVIEW_SIZE, MAX_PREVIEW_SIZE))
+                    img = preview
+
+                    # ==========================
+                    # 🔥 MARCA REPETIDA
+                    # ==========================
+                    overlay = Image.new("RGBA", img.size, (255,255,255,0))
+
+                    font_size = int(img.width / 18)
+
+                    for y in range(-200, img.height + 200, int(font_size * 4)):
+                        for x in range(-200, img.width + 200, int(font_size * 5)):
+
+                            txt = Image.new(
+                                "RGBA",
+                                (font_size * 15, font_size * 3),
+                                (0,0,0,0)
+                            )
+
+                            d = ImageDraw.Draw(txt)
+
+                            d.text(
+                                (0,0),
+                                "LUCIÉRNAGA",
+                                font=font,
+                                fill=(255,255,255,85)
+                            )
+
+                            txt = txt.rotate(
+                                20,
+                                expand=True
+                            )
+
+                            overlay.alpha_composite(
+                                txt,
+                                (x,y)
+                            )
+
+                    img = Image.alpha_composite(img, overlay)
+
+                    overlay_logo = Image.new(
+                        "RGBA",
+                        img.size,
+                        (255,255,255,0)
+                    )
+
+                    logo_size = int(img.width * 0.05)
+
+                    logo_repeat = watermark.resize(
+                        (
+                            logo_size,
+                            int(
+                                watermark.height *
+                                logo_size /
+                                watermark.width
+                            )
+                        ),
+                        Image.LANCZOS
+                    )
+
+                    for y in range(-150, img.height + 150, int(font_size * 4)):
+                        for x in range(-150, img.width + 150, int(font_size * 5)):
+
+                            logo = logo_repeat.copy()
+
+                            alpha = logo.split()[3]
+                            alpha = alpha.point(lambda p: p * 0.20)
+
+                            logo.putalpha(alpha)
+
+                            overlay_logo.alpha_composite(
+                                logo,
+                                (
+                                    x + int(font_size * 2),
+                                    y + int(font_size * 2)
+                                )
+                            )
+
+                    img = Image.alpha_composite(
+                        img,
+                        overlay_logo
+                    )
+
+                    img.convert("RGB").save(
+                        prev_path,
+                        format="JPEG",
+                        quality=50
+                    )
+
+                    fotos_count += 1
+
+                except Exception as e:
+                    print("Error procesando:", member.filename, e)
+                    continue
+
+        finally:

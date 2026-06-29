@@ -1,0 +1,36 @@
+{% extends "admin.html" %}
+{% block content %}
+
+<h2>📱 Instalaciones App</h2>
+
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin-top:20px;">
+
+<div style="background:#111827;padding:20px;border-radius:12px;">
+Total: {{ total }}
+</div>
+
+<div style="background:#111827;padding:20px;border-radius:12px;">
+Hoy: {{ hoy }}
+</div>
+
+<div style="background:#111827;padding:20px;border-radius:12px;">
+Semana: {{ semana }}
+</div>
+
+<div style="background:#111827;padding:20px;border-radius:12px;">
+Mes: {{ mes }}
+</div>
+
+</div>
+
+<h3 style="margin-top:30px;">Últimas instalaciones</h3>
+
+<ul style="list-style:none;padding:0;">
+{% for i in ultimas %}
+<li style="padding:8px;border-bottom:1px solid #333;">
+{{ i.fecha }}
+</li>
+{% endfor %}
+</ul>
+
+{% endblock %}

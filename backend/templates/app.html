@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+
+<title>Instalar Luciérnaga</title>
+
+<style>
+
+body{
+background:#050505;
+color:white;
+font-family:Arial,sans-serif;
+text-align:center;
+padding:40px;
+}
+
+.logo{
+width:140px;
+margin-bottom:20px;
+}
+
+h1{
+margin-bottom:10px;
+}
+
+p{
+color:#ccc;
+max-width:600px;
+margin:auto;
+line-height:1.6;
+}
+
+.btn{
+display:inline-block;
+margin-top:20px;
+background:#facc15;
+color:black;
+padding:14px 24px;
+border-radius:10px;
+font-weight:bold;
+text-decoration:none;
+}
+
+.card{
+background:#111827;
+padding:20px;
+border-radius:15px;
+max-width:700px;
+margin:30px auto;
+}
+
+</style>
+
+</head>
+<body>
+
+<img src="/static/logo.png" class="logo">
+
+<h1>Instala Luciérnaga</h1>
+
+<p>
+Encuentra tus fotografías oficiales más rápido,
+accede a nuevos eventos y guarda Luciérnaga
+directamente en tu celular.
+</p>
+
+<button id="installBtn" class="btn" style="display:none;">
+Instalar aplicación
+</button>
+
+<p id="counter" style="margin-top:15px;color:#ccc;">
+Instalaciones: 0
+</p>
+
+<div class="card">
+
+<h2>📱 Android</h2>
+
+<p>
+Pulsa el botón instalar cuando aparezca.
+</p>
+
+<button id="installBtn" class="btn" style="display:none;">
+Instalar aplicación
+</button>
+
+</div>
+
+<div class="card">
+
+<h2>🍎 iPhone</h2>
+
+<p>
+
+1️⃣ Pulsa Compartir
+
+<br><br>
+
+2️⃣ Selecciona "Añadir a pantalla de inicio"
+
+</p>
+
+</div>
+
+<a href="/" class="btn">
+Ver eventos
+</a>
+
+<script>
+
+let deferredPrompt;
+
+window.addEventListener(
+"beforeinstallprompt",
+(e)=>{
+
+e.preventDefault();
+
+deferredPrompt = e;
+
+document.getElementById(
+"installBtn"
+).style.display="inline-block";
+
+});
+
+document.getElementById(
+"installBtn"
+).addEventListener(
+"click",
+async ()=>{
+
+if(!deferredPrompt) return;
+
+deferredPrompt.prompt();
+
+await deferredPrompt.userChoice;
+
+});
+
+</script>
+
+<script>
+
+let deferredPrompt;
+
+window.addEventListener("beforeinstallprompt", (e)=>{
+    e.preventDefault();
+    deferredPrompt = e;
+
+    document.getElementById("installBtn").style.display="inline-block";
+});
+
+document.getElementById("installBtn").addEventListener("click", async ()=>{
+
+    if(!deferredPrompt) return;
+
+    deferredPrompt.prompt();
+
+    const choice = await deferredPrompt.userChoice;
+
+    fetch("/api/install", {method:"POST"})
+    .then(r=>r.json())
+    .then(data=>{
+        document.getElementById("counter").innerText =
+        "Instalaciones: " + data.total;
+    });
+
+});
+</script>
+
+<script>
+window.addEventListener("appinstalled", ()=>{
+
+    fetch("/api/install", {method:"POST"})
+    .then(r=>r.json())
+    .then(data=>{
+        console.log("Instalación registrada:", data.total);
+    });
+
+});
+</script>
+
+</body>
+</html>

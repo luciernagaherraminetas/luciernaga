@@ -1,0 +1,1336 @@
+from flask import (
+    Flask, render_template, request, jsonify,
+    send_file, abort, session, redirect
+)
+from functools import wraps
+from werkzeug.security import check_password_hash
+from werkzeug.utils import secure_filename
+import mercadopago
+import stripe
+import os, time, secrets, zipfile, json
+from datetime import datetime, timedelta
+import pytz
+from dotenv import load_dotenv
+from flask_sqlalchemy import SQLAlchemy
+from flask_mail import Mail, Message
+import io
+import shutil
+from PIL import ImageFile
+from PIL import Image, ImageDraw, ImageFont
+import json
+from datetime import datetime
+from flask import request, jsonify
+import json
+from pywebpush import webpush
+
+ImageFile.LOAD_TRUNCATED_IMAGES = True
+Image.MAX_IMAGE_PIXELS = None
+
+# ==========================
+# ENV
+# ==========================
+load_dotenv("/var/www/maraton_fotos/backend/.env", override=True)
+
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+
+print("STRIPE KEY:", stripe.api_key)
+
+
+# ==========================
+# APP
+# ==========================
+app = Flask(__name__)
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'
+app.config['MAIL_PORT'] = 587
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USERNAME'] = 'jmanuelphotographe@gmail.com'
+app.config['MAIL_PASSWORD'] = os.getenv("MAIL_PASSWORD")
+
+mail = Mail(app)
+
+app.secret_key = "luciernaga_super_secret_key"
+
+app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024 * 3000  # 3GB
+
+app.config.update(
+    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax"
+)
+
+@app.template_filter("datetimeformat")
+def datetimeformat(value):
+    try:
+        utc_time = datetime.utcfromtimestamp(int(value))
+        mexico_tz = pytz.timezone("America/Mexico_City")
+        local_time = pytz.utc.localize(utc_time).astimezone(mexico_tz)
+        return local_time.strftime("%d/%m/%Y %H:%M")
+    except:
+        return value
+
+ROSTROS_PATH = "/var/www/maraton_fotos/backend/data/rostros"
+# ==========================
+# CONFIG
+# ==========================
+PRECIO_FOTO = 100.0
+DESCARGA_HORAS = 48
+
+BASE_ALBUMS_PATH = "/var/www/maraton_fotos/backend/static/fotos_evento"
+ALBUMS_JSON = "/var/www/maraton_fotos/backend/data/albums.json"
+
+ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png"}
+MAX_PREVIEW_SIZE = 1600
+WATERMARK_PATH = "/var/www/maraton_fotos/backend/static/watermark/logo.png"
+
+# ==========================
+# HELPERS
+# ==========================
+def load_albums():
+    if not os.path.exists(ALBUMS_JSON):
+        return {}
+    try:
+        with open(ALBUMS_JSON, "r") as f:
+            return json.load(f)
+
+    except Exception:
+        return {}
+
+def save_albums(data):
+    os.makedirs(os.path.dirname(ALBUMS_JSON), exist_ok=True)
+    tmp = ALBUMS_JSON + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, ALBUMS_JSON)
+
+def clean_slug(slug):
+    return "".join(c for c in slug.lower() if c.isalnum() or c in "-_")
+
+def allowed_file(filename):
+    return filename.lower().endswith((".jpg",".jpeg",".png"))
+
+def enviar_correo(destino, link):
+
+    try:
+        msg = Message(
+            subject="Tus fotos están listas 📸",
+            sender=app.config['MAIL_USERNAME'],
+            recipients=[destino]
+        )
+
+        msg.body = f"""
+📸 ¡Gracias por tu compra!
+
+Descarga tus fotos aquí:
+{link}
+
+⏳ Disponible por 48 horas
+
+Luciérnaga
+"""
+
+        mail.send(msg)
+
+    except Exception as e:
+        print("Error correo:", e)
+
+# ==========================
+# ADMIN LOGIN
+# ==========================
+ADMIN_USER = "luciernaga"
+ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH")
+
+def admin_required(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not session.get("admin_logged"):
+            return redirect("/admin/login")
+        return f(*args, **kwargs)
+    return wrapper
+
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+
+    error = None
+
+    if request.method == "POST":
+
+        if (
+            request.form.get("usuario") == ADMIN_USER and
+            check_password_hash(
+                ADMIN_PASSWORD_HASH,
+                request.form.get("password")
+            )
+        ):
+            session.clear()
+            session["admin_logged"] = True
+
+            return redirect("/admin")
+
+        else:
+            error = "Credenciales incorrectas"
+
+    return render_template(
+        "admin_login.html",
+        error=error
+    )
+
+@app.route("/admin/logout")
+def admin_logout():
+    session.clear()
+    return redirect("/admin/login")
+
+# ==========================
+# DATABASE
+# ==========================
+app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+db = SQLAlchemy(app)
+
+class Pago(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    payment_id = db.Column(db.String(64), unique=True)
+    email = db.Column(db.String(255))
+    fotos = db.Column(db.JSON)
+    token = db.Column(db.String(64), unique=True)
+    evento = db.Column(db.String(200))
+    precio_unitario = db.Column(db.Float)
+    correo_enviado = db.Column(db.Boolean, default=False)
+    expira = db.Column(db.Integer)
+    descargado = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.Integer, default=lambda: int(time.time()))
+
+@app.route("/api/subscribe", methods=["POST"])
+def api_subscribe():
+
+    data = request.json
+
+    print("NUEVA SUSCRIPCION:")
+    print(data)
+
+    archivo = "data/subscriptions.json"
+
+    try:
+        with open(archivo, "r") as f:
+            subs = json.load(f)
+    except:
+        subs = []
+
+    nuevo = {
+        "subscription": data,
+        "user_agent": request.headers.get("User-Agent"),
+        "fecha": int(time.time())
+    }
+
+    subs.append(nuevo)
+
+    with open(archivo, "w") as f:
+        json.dump(subs, f)
+
+    return jsonify({
+        "success": True
+    })
+
+@app.route("/api/vapid-public-key")
+def vapid_public_key():
+    return jsonify({
+        "key": os.getenv("VAPID_PUBLIC_KEY")
+    })
+
+@app.route("/api/notificacion-abierta", methods=["POST"])
+def notificacion_abierta():
+
+    archivo = "data/notificaciones_stats.json"
+
+    try:
+        with open(archivo, "r") as f:
+            stats = json.load(f)
+    except:
+        stats = {
+            "enviadas": 0,
+            "abiertas": 0
+        }
+
+    stats["abiertas"] += 1
+
+    with open(archivo, "w") as f:
+        json.dump(stats, f)
+
+    return "", 204
+
+@app.route("/admin/send-notification", methods=["POST"])
+@admin_required
+def send_notification():
+
+    archivo = "data/subscriptions.json"
+
+    with open(archivo, "r") as f:
+        subs = json.load(f)
+
+    titulo = request.form.get("titulo")
+    mensaje = request.form.get("mensaje")
+    url = request.form.get("url")
+
+    payload = json.dumps({
+        "title": titulo,
+        "body": mensaje,
+        "url": url
+    })
+
+    print("PAYLOAD:")
+    print(payload)
+
+    enviados = 0
+
+    for i, sub in enumerate(subs):
+
+        try:
+
+            webpush(
+                subscription_info=sub["subscription"],
+                data=payload,
+                vapid_private_key="/var/www/maraton_fotos/backend/vapid_private.pem",
+                vapid_claims={
+                    "sub": "mailto:admin@luciernaga.site"
+                }
+            )
+
+            print(f"OK -> {i}")
+            enviados += 1
+
+            stats_file = "data/notificaciones_stats.json"
+
+            try:
+                with open(stats_file, "r") as f:
+                    stats = json.load(f)
+            except:
+                stats = {
+                    "enviadas": 0,
+                    "abiertas": 0
+                }
+
+            stats["enviadas"] += 1
+
+            with open(stats_file, "w") as f:
+                json.dump(stats, f)
+
+        except Exception as e:
+
+            print(f"ERROR -> {i}")
+            print(str(e))
+
+            continue
+
+    return redirect("/admin/notificaciones")
+
+# ==========================
+# MERCADO PAGO y sripe
+# ==========================
+sdk = mercadopago.SDK(os.getenv("MP_ACCESS_TOKEN"))
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+
+@app.route("/crear-checkout", methods=["POST"])
+def crear_checkout():
+
+    data = request.json
+
+    fotos = data.get("seleccionadas", [])
+    email = data.get("email")
+    evento = data.get("evento")
+
+    if not fotos:
+        return jsonify(error="Datos incompletos"), 400
+
+    albums = load_albums()
+
+    if evento not in albums:
+        return jsonify(error="Evento inválido"), 400
+
+    precio = albums[evento].get("precio", 100)
+
+    try:
+
+        session = stripe.checkout.Session.create(
+
+            payment_method_types=["card"],
+
+            line_items=[{
+                "price_data": {
+                    "currency": "mxn",
+                    "product_data": {
+                        "name": "Fotos del evento",
+                    },
+                    "unit_amount": int(precio * 100),
+                },
+                "quantity": len(fotos),
+            }],
+
+            mode="payment",
+
+            success_url="https://app.luciernaga.site/gracias-stripe?session_id={CHECKOUT_SESSION_ID}",
+            cancel_url="https://app.luciernaga.site/",
+
+            metadata={
+                "fotos": ",".join(fotos),
+                "email": email or "",
+                "evento": evento
+            }
+        )
+
+        return jsonify(url=session.url)
+
+    except Exception as e:
+
+        print("Stripe error:", e)
+
+        return jsonify(error="Error creando sesión de pago"), 500
+
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    payload = request.get_data(as_text=True)
+    sig_header = request.headers.get("Stripe-Signature")
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload,
+            sig_header,
+            os.getenv("STRIPE_WEBHOOK_SECRET")
+        )
+    except Exception:
+        return "", 400
+
+    if event["type"] == "checkout.session.completed":
+        session = event["data"]["object"]
+        handle_payment_success(session)
+
+    return "", 200
+
+# ==========================
+# ADMIN
+# ==========================
+@app.route("/admin")
+@admin_required
+def admin_dashboard():
+
+    albums = load_albums()
+
+    total_albums = len(albums)
+
+    pagos = Pago.query.all()
+
+    total_ventas = len(pagos)
+
+    total_fotos = sum(
+        len(p.fotos or [])
+        for p in pagos
+    )
+
+    total_ingresos = sum(
+        len(p.fotos or []) *
+        (p.precio_unitario or PRECIO_FOTO)
+        for p in pagos
+    )
+
+    return render_template(
+        "admin_dashboard.html",
+        total_albums=total_albums,
+        total_ventas=total_ventas,
+        total_fotos=total_fotos,
+        total_ingresos=round(total_ingresos,2)
+    )
+
+@app.route("/admin/pagos")
+@admin_required
+def admin_pagos():
+
+    pagos = Pago.query.order_by(
+        Pago.created_at.desc()
+    ).all()
+
+    total_pagos = len(pagos)
+    total_fotos = sum(
+        len(p.fotos or [])
+        for p in pagos
+    )
+
+    return render_template(
+        "admin_pagos.html",
+        pagos=pagos,
+        total_pagos=total_pagos,
+        total_fotos=total_fotos,
+        precio=PRECIO_FOTO
+    )
+
+@app.route("/admin/ver-pago/<int:pago_id>")
+@admin_required
+def admin_ver_pago(pago_id):
+
+    pago = Pago.query.get_or_404(pago_id)
+
+    return render_template(
+        "admin_ver_pago.html",
+        pago=pago
+    )
+@app.route("/admin/delete-pago/<int:pago_id>")
+@admin_required
+def delete_pago(pago_id):
+
+    pago = Pago.query.get_or_404(pago_id)
+
+    db.session.delete(pago)
+    db.session.commit()
+
+    return redirect("/admin")
+
+# ==========================
+# ALBUMS
+# ==========================
+@app.route("/admin/albums")
+@admin_required
+def admin_albums():
+
+    albums = load_albums()
+    pagos = Pago.query.all()
+
+    resumen_ventas = {}
+
+    for slug in albums.keys():
+        resumen_ventas[slug] = {
+            "fotos_vendidas": 0,
+            "total_dinero": 0
+        }
+
+    for p in pagos:
+        if p.evento in resumen_ventas:
+            cantidad = len(p.fotos or [])
+            resumen_ventas[p.evento]["fotos_vendidas"] += cantidad
+            resumen_ventas[p.evento]["total_dinero"] += cantidad * (p.precio_unitario or PRECIO_FOTO)
+
+    return render_template(
+        "admin_albums_dashboard.html",
+        albums=albums,
+        resumen_ventas=resumen_ventas
+    )
+
+@app.route("/admin/albums/new")
+@admin_required
+def admin_new_album():
+    return render_template("admin_album_new.html")
+
+@app.route("/admin/albums/preview/<slug>")
+@admin_required
+def admin_album_preview(slug):
+    preview_path = os.path.join(BASE_ALBUMS_PATH, slug, "preview")
+    if not os.path.exists(preview_path):
+        return redirect("/admin/albums")
+
+    fotos = sorted(os.listdir(preview_path))
+    return render_template(
+        "admin_album_preview.html",
+        fotos=fotos,
+        carpeta=slug
+    )
+
+@app.route("/admin/albums/upload", methods=["POST"])
+@admin_required
+def upload_album():
+    nombre = request.form.get("nombre")
+    lugar = request.form.get("lugar")
+    carpeta = clean_slug(request.form.get("carpeta"))
+
+    zip_file = request.files.get("zip")
+    portada = request.files.get("portada")
+
+    if not nombre or not lugar or not carpeta or not zip_file:
+        return ("", 204)
+
+    albums = load_albums()
+    if carpeta in albums:
+        return ("", 204)
+
+    albums[carpeta] = {
+        "nombre": nombre,
+        "lugar": lugar,
+        "fecha": request.form.get("fecha"),
+        "precio": float(request.form.get("precio", 100)),
+        "activo": False,
+        "fotos": 0,
+        "vistas": 0
+    }
+
+    save_albums(albums)
+
+    # guardar portada personalizada
+    if portada and portada.filename:
+
+        os.makedirs(
+            os.path.join(app.static_folder, "portadas"),
+            exist_ok=True
+        )
+
+        portada_path = os.path.join(
+            app.static_folder,
+            "portadas",
+            f"{carpeta}.jpg"
+        )
+
+        Image.open(portada).convert("RGB").save(
+            portada_path,
+            quality=95
+        )
+
+    album_path = os.path.join(BASE_ALBUMS_PATH, carpeta)
+    originals = os.path.join(album_path, "originales")
+    previews = os.path.join(album_path, "preview")
+
+    os.makedirs(originals, exist_ok=True)
+    os.makedirs(previews, exist_ok=True)
+
+    temp_zip = f"/tmp/{secure_filename(zip_file.filename)}"
+    zip_file.save(temp_zip)
+
+    fotos_count = 0
+    watermark = Image.open(WATERMARK_PATH).convert("RGBA")
+
+    try:
+        with zipfile.ZipFile(temp_zip, "r") as zip_ref:
+            for member in zip_ref.infolist():
+
+                if member.is_dir():
+                    continue
+
+                base = secure_filename(os.path.basename(member.filename))
+                if not base or not allowed_file(base):
+                    continue
+
+                name, _ = os.path.splitext(base)
+                filename = f"{name}_{fotos_count}.jpg"
+
+                try:
+                    with zip_ref.open(member) as file:
+                        img = Image.open(file).convert("RGBA")
+
+                    orig_path = os.path.join(originals, filename)
+                    prev_path = os.path.join(previews, filename)
+
+                    # guardar original
+                    img.convert("RGB").save(orig_path, format="JPEG", quality=92)
+
+                    # generar preview
+                    preview = img.copy()
+                    preview.thumbnail((MAX_PREVIEW_SIZE, MAX_PREVIEW_SIZE))
+                    img = preview
+
+                    # ==========================
+                    # 🔥 MARCA REPETIDA
+                    # ==========================
+                    overlay = Image.new("RGBA", img.size, (255,255,255,0))
+
+                    font_size = int(img.width / 18)
+
+                    for y in range(-200, img.height + 200, int(font_size * 4)):
+                        for x in range(-200, img.width + 200, int(font_size * 5)):
+
+                            txt = Image.new(
+                                "RGBA",
+                                (font_size * 15, font_size * 3),
+                                (0,0,0,0)
+                            )
+
+                            d = ImageDraw.Draw(txt)
+
+                            d.text(
+                                (0,0),
+                                "LUCIÉRNAGA",
+                                font=font,
+                                fill=(255,255,255,85)
+                            )
+
+                            txt = txt.rotate(
+                                20,
+                                expand=True
+                            )
+
+                            overlay.alpha_composite(
+                                txt,
+                                (x,y)
+                            )
+
+img = Image.alpha_composite(img, overlay)
+
+overlay_logo = Image.new(
+    "RGBA",
+    img.size,
+    (255,255,255,0)
+)
+
+logo_size = int(img.width * 0.05)
+
+logo_repeat = watermark.resize(
+    (
+        logo_size,
+        int(
+            watermark.height *
+            logo_size /
+            watermark.width
+        )
+    ),
+    Image.LANCZOS
+)
+
+for y in range(-150, img.height + 150, int(font_size * 4)):
+    for x in range(-150, img.width + 150, int(font_size * 5)):
+
+        logo = logo_repeat.copy()
+
+        alpha = logo.split()[3]
+        alpha = alpha.point(lambda p: p * 0.20)
+
+        logo.putalpha(alpha)
+
+        overlay_logo.alpha_composite(
+            logo,
+            (
+                x + int(font_size * 2),
+                y + int(font_size * 2)
+            )
+        )
+
+img = Image.alpha_composite(
+    img,
+    overlay_logo
+)
+
+img.convert("RGB").save(
+    prev_path,
+    format="JPEG",
+    quality=50
+)
+
+fotos_count += 1
+
+                except Exception as e:
+                    print("Error procesando:", member.filename, e)
+                    continue
+
+    finally:
+        if os.path.exists(temp_zip):
+            os.remove(temp_zip)
+
+    albums = load_albums()
+    albums[carpeta]["fotos"] = fotos_count
+    save_albums(albums)
+
+    return ("", 204)
+
+@app.route("/admin/albums/toggle/<slug>")
+@admin_required
+def toggle_album(slug):
+    albums = load_albums()
+    if slug in albums:
+        albums[slug]["activo"] = not albums[slug]["activo"]
+        save_albums(albums)
+    return redirect("/admin/albums")
+
+@app.route("/admin/albums/precio/<slug>", methods=["GET","POST"])
+@admin_required
+def cambiar_precio(slug):
+
+    albums = load_albums()
+
+    if slug not in albums:
+        return redirect("/admin/albums")
+
+    if request.method == "POST":
+        nuevo_precio = float(request.form.get("precio",100))
+        albums[slug]["precio"] = nuevo_precio
+        save_albums(albums)
+        return redirect("/admin/albums")
+
+    return render_template(
+        "admin_album_precio.html",
+        slug=slug,
+        album=albums[slug]
+    )
+
+
+@app.route("/admin/albums/portada/<slug>", methods=["GET", "POST"])
+@admin_required
+def cambiar_portada(slug):
+
+    albums = load_albums()
+
+    if slug not in albums:
+        return redirect("/admin/albums")
+
+    if request.method == "POST":
+
+        portada = request.files.get("portada")
+
+        if portada and portada.filename:
+
+            os.makedirs(
+                os.path.join(app.static_folder, "portadas"),
+                exist_ok=True
+            )
+
+            portada_path = os.path.join(
+                app.static_folder,
+                "portadas",
+                f"{slug}.jpg"
+            )
+
+            Image.open(portada).convert("RGB").save(
+                portada_path,
+                quality=95
+            )
+
+        return redirect("/admin/albums")
+
+    return render_template(
+        "admin_portada.html",
+        slug=slug,
+        album=albums[slug]
+    )
+
+@app.route("/admin/albums/agregar-fotos/<slug>", methods=["GET","POST"])
+@admin_required
+def agregar_fotos_album(slug):
+
+    albums = load_albums()
+
+    if slug not in albums:
+        return redirect("/admin/albums")
+
+    if request.method == "POST":
+
+        zip_file = request.files.get("zip")
+
+        if not zip_file:
+            return redirect(f"/admin/albums/agregar-fotos/{slug}")
+
+        album_path = os.path.join(BASE_ALBUMS_PATH, slug)
+
+        originals = os.path.join(album_path, "originales")
+        previews = os.path.join(album_path, "preview")
+
+        temp_zip = f"/tmp/{secure_filename(zip_file.filename)}"
+        zip_file.save(temp_zip)
+
+        fotos_count = len(os.listdir(originals))
+
+        watermark = Image.open(WATERMARK_PATH).convert("RGBA")
+
+        try:
+
+            with zipfile.ZipFile(temp_zip, "r") as zip_ref:
+
+                for member in zip_ref.infolist():
+
+                    if member.is_dir():
+                        continue
+
+                    base = secure_filename(
+                        os.path.basename(member.filename)
+                    )
+
+                    if not base or not allowed_file(base):
+                        continue
+
+                    name, _ = os.path.splitext(base)
+
+                    filename = f"{name}_{fotos_count}.jpg"
+
+                    try:
+
+                        with zip_ref.open(member) as file:
+                            img = Image.open(file).convert("RGBA")
+
+                        orig_path = os.path.join(
+                            originals,
+                            filename
+                        )
+
+                        prev_path = os.path.join(
+                            previews,
+                            filename
+                        )
+
+                        img.convert("RGB").save(
+                            orig_path,
+                            format="JPEG",
+                            quality=92
+                        )
+
+                        preview = img.copy()
+                        preview.thumbnail(
+                            (MAX_PREVIEW_SIZE, MAX_PREVIEW_SIZE)
+                        )
+
+                        img = preview
+
+                        overlay = Image.new(
+                            "RGBA",
+                            img.size,
+                            (255,255,255,0)
+                        )
+
+                        draw = ImageDraw.Draw(overlay)
+
+                        texto = "LUCIERNAGA"
+
+                        font_size = int(img.width / 20)
+
+                        try:
+                            font = ImageFont.truetype(
+                                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                                font_size
+                            )
+                        except:
+                            font = ImageFont.load_default()
+
+                        for y in range(-100, img.height, int(font_size * 9)):
+                            for x in range(-100, img.width, int(font_size * 11)):
+                                draw.text(
+                                    (x, y),
+                                    "LUCIERNAGA",
+                                    font=font,
+                                    fill=(255,255,255,40)
+                                )
+
+                    img = Image.alpha_composite(img, overlay)
+
+                    overlay_logo = Image.new(
+                        "RGBA",
+                        img.size,
+                        (255,255,255,0)
+                    )
+
+                    logo_size = int(img.width * 0.05)
+
+                    logo_repeat = watermark.resize(
+                        (
+                            logo_size,
+                            int(
+                                watermark.height *
+                                logo_size /
+                                watermark.width
+                            )
+                        ),
+                        Image.LANCZOS
+                    )
+
+                    for y in range(-150, img.height + 150, int(font_size * 4)):
+                        for x in range(-150, img.width + 150, int(font_size * 5)):
+
+                            logo = logo_repeat.copy()
+
+                            alpha = logo.split()[3]
+                            alpha = alpha.point(lambda p: p * 0.20)
+
+                            logo.putalpha(alpha)
+
+                            overlay_logo.alpha_composite(
+                                logo,
+                                (
+                                    x + int(font_size * 2),
+                                    y + int(font_size * 2)
+                                )
+                            )
+
+                    img = Image.alpha_composite(
+                        img,
+                        overlay_logo
+                    )
+
+                    img.convert("RGB").save(
+                        prev_path,
+                        format="JPEG",
+                        quality=50
+                    )
+
+                    fotos_count += 1
+
+                    except Exception as e:
+                        print(e)
+
+        finally:
+
+            if os.path.exists(temp_zip):
+                os.remove(temp_zip)
+
+        albums[slug]["fotos"] = fotos_count
+        save_albums(albums)
+
+        return redirect("/admin/albums")
+
+    return render_template(
+        "admin_agregar_fotos.html",
+        slug=slug,
+        album=albums[slug]
+    )
+
+@app.route("/admin/albums/delete/<slug>", methods=["POST"])
+@admin_required
+def delete_album(slug):
+
+    albums = load_albums()
+
+    if slug not in albums:
+        return ("", 204)
+
+    # 1️⃣ borrar carpeta del álbum
+    album_path = os.path.join(BASE_ALBUMS_PATH, slug)
+
+    if os.path.exists(album_path):
+       shutil.rmtree(album_path)
+
+    # 2️⃣ borrar rostros del álbum
+    rostros_path = os.path.join(ROSTROS_PATH, f"{slug}.json")
+
+    if os.path.exists(rostros_path):
+        os.remove(rostros_path)
+
+    # 3️⃣ eliminar del panel
+    del albums[slug]
+    save_albums(albums)
+
+    return redirect("/admin/albums")
+
+# ==========================
+# HOME
+# ==========================
+@app.route("/")
+def index():
+
+    albums = load_albums()
+
+    activos = {}
+
+    for slug, album in albums.items():
+        if album.get("activo"):
+            activos[slug] = album
+
+    if not activos:
+        return "⏳ Próximamente"
+
+    return render_template(
+        "eventos.html",
+        albums=activos
+    )
+
+@app.route("/app")
+def instalar_app():
+    return render_template("app.html")
+
+@app.route("/evento/<slug>")
+def ver_evento(slug):
+
+    albums = load_albums()
+
+    if slug not in albums:
+        abort(404)
+
+    albums[slug]["vistas"] = albums[slug].get("vistas", 0) + 1
+    save_albums(albums)
+
+    preview = os.path.join(
+        BASE_ALBUMS_PATH,
+        slug,
+        "preview"
+    )
+
+    fotos = sorted(os.listdir(preview))
+
+    return render_template(
+        "index.html",
+        fotos=fotos,
+        evento={"carpeta": slug},
+        precio=albums[slug].get("precio",100)
+    )
+
+@app.route("/portada/<slug>")
+def portada_evento(slug):
+
+    portada_personalizada = os.path.join(
+        app.static_folder,
+        "portadas",
+        f"{slug}.jpg"
+    )
+
+    if os.path.exists(portada_personalizada):
+        return send_file(portada_personalizada)
+
+    # respaldo
+    preview = os.path.join(
+        BASE_ALBUMS_PATH,
+        slug,
+        "preview"
+    )
+
+    fotos = sorted(os.listdir(preview))
+
+    return send_file(
+        os.path.join(preview, fotos[0])
+    )
+
+# 🔎 BUSCAR POR DORSAL
+@app.route("/buscar-dorsal/<dorsal>")
+def buscar_dorsal(dorsal):
+    albums = load_albums()
+    activo = next((k for k, v in albums.items() if v.get("activo")), None)
+    if not activo:
+        return jsonify(fotos=[])
+
+    preview_path = os.path.join(BASE_ALBUMS_PATH, activo, "preview")
+    if not os.path.exists(preview_path):
+        return jsonify(fotos=[])
+
+    fotos = [f for f in os.listdir(preview_path) if f.startswith(dorsal)]
+    return jsonify(fotos=fotos)
+
+@app.route("/guardar-rostros/<album>", methods=["POST"])
+def guardar_rostros(album):
+
+    data = request.json
+
+    rostros_path = os.path.join(ROSTROS_PATH, f"{album}.json")
+
+    with open(rostros_path, "w") as f:
+        json.dump(data, f)
+
+    return {"status": "ok"}
+
+@app.route("/rostros/<album>")
+def obtener_rostros(album):
+
+    archivo = os.path.join(ROSTROS_PATH, f"{album}.json")
+
+    if not os.path.exists(archivo):
+        return jsonify([])
+
+    with open(archivo) as f:
+        data = json.load(f)
+
+    return jsonify(data)
+
+@app.route("/descargar/<token>")
+def descargar(token):
+
+    pago = Pago.query.filter_by(token=token).first()
+
+    if not pago:
+        return "Enlace inválido", 404
+
+    if pago.expira < int(time.time()):
+        return "Enlace expirado", 403
+    nombre_evento = pago.evento
+
+    if not nombre_evento:
+        return "Evento no asociado al pago", 500
+
+    memory_file = io.BytesIO()
+
+    with zipfile.ZipFile(memory_file, "w") as zf:
+        for foto in pago.fotos:
+            ruta = os.path.join(
+                BASE_ALBUMS_PATH,
+                nombre_evento,
+                "originales",
+                foto
+            )
+
+            if os.path.exists(ruta):
+                zf.write(ruta, foto)
+
+    memory_file.seek(0)
+
+    pago.descargado = True
+    db.session.commit()
+
+    return send_file(
+        memory_file,
+        as_attachment=True,
+        download_name="fotos.zip",
+        mimetype="application/zip"
+    )
+
+@app.route("/gracias-stripe")
+def gracias_stripe():
+    import secrets
+    import time
+    import json
+
+    session_id = request.args.get("session_id")
+
+    if not session_id:
+        return "Pago inválido"
+
+    session = stripe.checkout.Session.retrieve(session_id)
+
+    if session.payment_status != "paid":
+        return "Pago aún procesándose..."
+
+    # Buscar si ya existe el pago
+    pago = Pago.query.filter_by(payment_id=session_id).first()
+
+    if not pago:
+
+        fotos_raw = session.metadata.get("fotos", "")
+        email = session.metadata.get("email", "")
+
+        fotos_lista = fotos_raw.split(",") if fotos_raw else []
+        fotos_json = json.loads(json.dumps(fotos_lista))
+
+        token = secrets.token_urlsafe(32)
+
+        albums = load_albums()
+
+        evento = session.metadata.get("evento")
+
+        if evento not in albums:
+            return "Evento inválido"
+
+        precio_actual = albums[evento].get("precio", 100)
+
+        nuevo_pago = Pago(
+            payment_id=session_id,
+            email=email,
+            fotos=fotos_json,
+            token=token,
+            evento=evento,
+            precio_unitario=precio_actual,   # 👈 CLAVE
+            expira=int(time.time()) + 86400,
+            descargado=False,
+            created_at=int(time.time())
+        )
+
+        db.session.add(nuevo_pago)
+        db.session.commit()
+
+        link = f"https://app.luciernaga.site/descargar/{nuevo_pago.token}"
+
+        if nuevo_pago.email and not nuevo_pago.correo_enviado:
+            enviar_correo(nuevo_pago.email, link)
+            nuevo_pago.correo_enviado = True
+            db.session.commit()
+
+        pago = nuevo_pago
+
+    return render_template(
+        "gracias.html",
+        fotos=len(pago.fotos),
+        token=pago.token
+    )
+
+@app.route("/auto-descarga")
+def auto_descarga():
+
+    session_id = request.args.get("session_id")
+
+    if not session_id:
+        return "Pago inválido"
+
+    pago = Pago.query.filter_by(payment_id=session_id).first()
+
+    if not pago:
+        return "Pago no encontrado"
+
+    return redirect(f"/descargar/{pago.token}")
+
+@app.route("/api/install", methods=["POST"])
+def registrar_instalacion():
+
+    path = "data/instalaciones.json"
+
+    with open(path, "r") as f:
+        data = json.load(f)
+
+    data["instalaciones"].append({
+        "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    })
+
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+
+    return {"ok": True}
+
+@app.route("/admin/instalaciones")
+@admin_required
+def admin_instalaciones():
+
+    path = "data/instalaciones.json"
+
+    with open(path, "r") as f:
+        data = json.load(f)
+
+    instalaciones = data["instalaciones"]
+
+    total = len(instalaciones)
+
+    hoy = datetime.now().strftime("%Y-%m-%d")
+
+    hoy_count = len([i for i in instalaciones if i["fecha"].startswith(hoy)])
+
+    semana_count = len(instalaciones[-7:])
+    mes_count = len(instalaciones[-30:])
+
+    return render_template(
+        "admin_instalaciones.html",
+        total=total,
+        hoy=hoy_count,
+        semana=semana_count,
+        mes=mes_count,
+        ultimas=instalaciones[-20:][::-1]
+    )
+
+@app.route("/admin/notificaciones")
+@admin_required
+def admin_notificaciones():
+
+    archivo = "data/subscriptions.json"
+
+    try:
+        with open(archivo, "r") as f:
+            subs = json.load(f)
+    except:
+        subs = []
+
+    iphone = 0
+    android = 0
+    desktop = 0
+
+    for s in subs:
+
+        ua = s.get("user_agent", "")
+
+        if "iPhone" in ua:
+            iphone += 1
+
+        elif "Android" in ua:
+            android += 1
+
+        else:
+            desktop += 1
+
+    stats_file = "data/notificaciones_stats.json"
+
+    try:
+        with open(stats_file, "r") as f:
+            stats = json.load(f)
+    except:
+        stats = {
+            "enviadas": 0,
+            "abiertas": 0
+        }
+
+    return render_template(
+        "admin_notificaciones.html",
+        total=len(subs),
+        iphone=iphone,
+        android=android,
+        desktop=desktop,
+        enviadas=stats["enviadas"],
+        abiertas=stats["abiertas"]
+    )

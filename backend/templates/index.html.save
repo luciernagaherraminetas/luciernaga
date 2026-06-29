@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Galería del Evento</title>
+
+<link rel="preload" as="image"
+href="{{ url_for('static', filename='fotos_evento/' + evento.carpeta + '/preview/' + fotos[0]) }}">
+
+<script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+
+<style>
+body{
+  background:#111;
+  color:#fff;
+  font-family:Arial,sans-serif;
+  text-align:center;
+}
+input, button{
+  padding:8px 12px;
+  font-size:15px;
+}
+.galeria{
+  column-count:5;
+  column-gap:12px;
+  padding:20px;
+}
+.foto-card{
+  break-inside:avoid;
+  margin-bottom:12px;
+  position:relative;
+}
+.foto-card img{
+  width:100%;
+  height:auto;
+  min-height:220px;
+  object-fit:cover;
+  border-radius:8px;
+  cursor:pointer;
+  transition:.2s;
+}
+
+@media (max-width:900px){
+  .galeria{
+    column-count:3;
+  }
+}
+
+@media (max-width:500px){
+  .galeria{
+    column-count:2;
+  }
+}
+.foto-card img.seleccionada{
+  outline:4px solid #22c55e;
+  transform:scale(.96);
+}
+#resumen{
+  margin:20px;
+  font-size:18px;
+  color:#22c55e;
+}
+.modal-foto{
+position:fixed;
+top:0;
+left:0;
+width:100%;
+height:100%;
+background:rgba(0,0,0,0.9);
+display:none;
+justify-content:center;
+align-items:center;
+z-index:9999;
+}
+
+.modal-foto img{
+max-width:90%;
+max-height:90%;
+border-radius:10px;
+}
+
+.foto-preview{
+cursor:pointer;
+}
+#carritoFlotante{
+position:fixed;
+bottom:20px;
+right:20px;
+
+background:#facc15;
+color:black;
+
+padding:15px 20px;
+border-radius:12px;
+
+font-weight:bold;
+
+box-shadow:0 5px 20px rgba(0,0,0,.4);
+z-index:999;
+}
+#carritoFlotante button{
+margin-left:12px;
+
+background:black;
+color:white;
+
+border:none;
+padding:8px 14px;
+border-radius:6px;
+
+cursor:pointer;
+font-weight:bold;
+}
+.foto-card{
+position:relative;
+}
+
+.btn-carrito{
+position:absolute;
+top:8px;
+right:8px;
+
+background:white;
+color:black;
+
+border:none;
+border-radius:50%;
+
+width:36px;
+height:36px;
+
+font-size:18px;
+cursor:pointer;
+
+display:flex;
+align-items:center;
+justify-content:center;
+
+box-shadow:0 3px 10px rgba(0,0,0,.35);
+
+transition:all .2s ease;
+}
+
+.btn-carrito:hover{
+transform:scale(1.08);
+}
+
+@keyframes carritoBounce{
+
+0%{
+transform:scale(1);
+}
+
+40%{
+transform:scale(1.15);
+}
+
+70%{
+transform:scale(.95);
+}
+
+100%{
+transform:scale(1);
+}
+
+}
+
+.carrito-animar{
+animation:carritoBounce .35s ease;
+}
+
+</style>
+</head>
+
+<body>
+
+<h1>📸 Fotos del Evento</h1>
+
+<input id="buscadorDorsal" placeholder="Buscar por número de dorsal">
+<button onclick="buscarPorDorsal()">Buscar</button>
+<button onclick="mostrarTodas()">Mostrar todas</button>
+
+<br><br>
+
+<input type="file" id="selfieInput" accept="image/*">
+<button onclick="buscarPorSelfie()">Buscar por Selfie</button>
+
+<hr>
+
+<div id="resumen">
+  Fotos seleccionadas: <span id="contador">0</span> ·
+  Total: $<span id="total">0</span>
+</div>
+
+<div style="margin:20px;">
+<input 
+type="email"
+id="emailCliente"
+placeholder="Ingresa tu correo para recibir tus fotos"
+style="padding:12px;width:300px;border-radius:6px;border:none;text-align:center;font-size:15px"
+>
+</div>
+
+<button id="btnPagar" type="button" onclick="pagar()">💳 Pagar fotos seleccionadas</button>
+
+<div class="galeria" id="galeria">
+{% for foto in fotos %}
+<div class="foto-card" data-foto="{{ foto }}">
+
+<img
+loading="lazy"
+decoding="async"
+src="{{ url_for('static', filename='fotos_evento/' + evento.carpeta + '/preview/' + foto) }}"
+data-src="{{ url_for('static', filename='fotos_evento/' + evento.carpeta + '/preview/' + foto) }}"
+onclick="verFoto(this.src)"
+class="foto-preview lazy-img"
+>
+
+<button class="btn-carrito" onclick="agregarCarrito(event,'{{ foto }}',this)">
+🛒
+</button>
+
+</div>
+{% endfor %}
+</div>
+
+<div id="modalFoto" class="modal-foto">
+    <img id="modalImg">
+</div>
+</div>
+
+<!-- 🟡 OVERLAY -->
+<div id="loadingOverlay" style="
+  display:none;
+  position:fixed;
+  inset:0;
+  background:#111;
+  z-index:9999;
+  color:#fff;
+  justify-content:center;
+  align-items:center;
+  flex-direction:column;
+">
+
+  <h2 style="margin-bottom:20px;">🔎 Buscando fotos...</h2>
+
+  <div style="
+    width:300px;
+    height:18px;
+    background:#1e293b;
+    border-radius:10px;
+    overflow:hidden;
+  ">
+    <div id="progressBar" style="
+      height:100%;
+      width:0%;
+      background:#facc15;
+      transition:width .3s ease;
+    "></div>
+  </div>
+
+  <p style="margin-top:15px; opacity:.7;">
+    Analizando imágenes del evento...
+  </p>
+
+</div>
+<script>
+const PRECIO_FOTO = {{ precio }};
+let seleccionadas = new Set();
+let modelosCargados = false;
+
+const contador = document.getElementById("contador");
+const total = document.getElementById("total");
+const overlay = document.getElementById("loadingOverlay");
+const progressBar = document.getElementById("progressBar");
+
+/* LOADER */
+function mostrarLoader(){
+  overlay.style.display = "flex";
+}
+
+function ocultarLoader(){
+  overlay.style.display = "none";
+}
+
+/* BUSCAR POR DORSAL */
+async function buscarPorDorsal(){
+  const dorsal = document.getElementById("buscadorDorsal").value.trim();
+
+  if(!dorsal){
+    alert("Ingresa un número de dorsal");
+    return;
+  }
+
+  mostrarLoader();
+
+  const res = await fetch(`/buscar-dorsal/${dorsal}`);
+  const data = await res.json();
+
+  const fotos = data.fotos || [];
+
+  document.querySelectorAll(".foto-card").forEach(card=>{
+    card.style.display = fotos.includes(card.dataset.foto) ? "block" : "none";
+  });
+
+  ocultarLoader();
+}
+
+/* MOSTRAR TODAS */
+function mostrarTodas(){
+  document.querySelectorAll(".foto-card").forEach(card=>{
+    card.style.display = "block";
+  });
+}
+
+/* FACE API */
+async function cargarModelos(){
+
+  if(modelosCargados) return;
+
+  await faceapi.nets.tinyFaceDetector.loadFromUri('/static/models');
+  await faceapi.nets.faceLandmark68Net.loadFromUri('/static/models');
+  await faceapi.nets.faceRecognitionNet.loadFromUri('/static/models');
+
+  modelosCargados = true;
+}
+
+/* BUSCAR POR SELFIE */
+async function buscarPorSelfie(){
+
+  const file = document.getElementById("selfieInput").files[0];
+
+  if(!file){
+    alert("Sube una selfie");
+    return;
+  }
+
+  mostrarLoader();
+
+  await cargarModelos();
+
+  const imgSelfie = await faceapi.bufferToImage(file);
+
+  const ref = await faceapi
+    .detectSingleFace(
+      imgSelfie,
+      new faceapi.TinyFaceDetectorOptions({
+        inputSize:512,
+        scoreThreshold:0.2
+      })
+    )
+    .withFaceLandmarks()
+    .withFaceDescriptor();
+
+  if(!ref){
+    ocultarLoader();
+    alert("No se detectó rostro");
+    return;
+  }
+
+  const res = await fetch("/rostros");
+  const rostros = await res.json();
+
+  let resultados = [];
+
+  for(const r of rostros){
+
+    const distancia = faceapi.euclideanDistance(
+      ref.descriptor,
+      new Float32Array(r.descriptor)
+    );
+
+    resultados.push({
+      foto: r.foto,
+      distancia: distancia
+    });
+
+  }
+
+  resultados.sort((a,b)=>a.distancia-b.distancia);
+
+  const mejores = resultados.slice(0,150);
+
+  document.querySelectorAll(".foto-card").forEach(card=>{
+    card.style.display = "none";
+  });
+
+  for(const r of mejores){
+
+    if(r.distancia < 0.75){
+
+      const card = document.querySelector(`[data-foto="${r.foto}"]`);
+
+      if(card){
+        card.style.display = "block";
+      }
+
+    }
+
+  }
+
+  ocultarLoader();
+
+}
+
+/* INDEXAR ROSTROS */
+async function indexarRostros(){
+
+  await cargarModelos();
+
+  const imagenes = document.querySelectorAll(".galeria img");
+
+  let rostros = [];
+
+  for(const img of imagenes){
+
+    const imagenOriginal = await faceapi.fetchImage(img.src);
+
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+
+    canvas.width = 256;
+    canvas.height = 256;
+
+    ctx.drawImage(imagenOriginal,0,0,256,256);
+
+    const imagen = canvas;
+
+    const detecciones = await faceapi
+      .detectAllFaces(
+        imagen,
+        new faceapi.TinyFaceDetectorOptions({
+          inputSize:256,
+          scoreThreshold:0.3
+        })
+      )
+      .withFaceLandmarks()
+      .withFaceDescriptors();
+
+    for(const face of detecciones){
+
+      rostros.push({
+        foto: img.parentElement.dataset.foto,
+        descriptor: Array.from(face.descriptor)
+      });
+
+    }
+
+  }
+
+  await fetch("/guardar-rostros",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({rostros})
+  });
+
+}
+
+/* EJECUTAR INDEXADO AL CARGAR */
+window.addEventListener("load", () => {
+  indexarRostros();
+});
+
+/* PAGO */
+const btnPagar = document.getElementById("btnPagar");
+
+async function pagar(){
+
+  if(seleccionadas.size === 0){
+    alert("Selecciona al menos una foto");
+    return;
+  }
+
+  const emailInput = document.getElementById("emailCliente");
+  const email = emailInput.value.trim();
+
+  if(!email){
+
+    alert("Por favor ingresa tu correo para continuar");
+
+    emailInput.scrollIntoView({
+      behavior:"smooth",
+      block:"center"
+    });
+
+    emailInput.focus();
+
+    return;
+  }
+
+  btnPagar.disabled = true;
+  btnPagar.textContent = "Redirigiendo a Stripe…";
+
+  const res = await fetch("/crear-checkout",{
+    method:"POST",
+    headers:{
+      "Content-Type":"application/json"
+    },
+    body:JSON.stringify({
+      seleccionadas:[...seleccionadas],
+      email:email
+    })
+  });
+
+  const data = await res.json();
+
+  if(data.url){
+    window.location.href = data.url;
+  }
+
+}
+</script>
+
+<script>
+
+function agregarCarrito(e,foto,btn){
+
+e.stopPropagation()
+
+if(seleccionadas.has(foto)){
+
+seleccionadas.delete(foto)
+btn.style.background="white"
+btn.style.color="black"
+
+}else{
+
+seleccionadas.add(foto)
+btn.style.background="#facc15"
+btn.style.color="black"
+
+}
+
+contador.textContent = seleccionadas.size
+total.textContent = seleccionadas.size * PRECIO_FOTO
+
+document.getElementById("contadorFotos").textContent = seleccionadas.size
+document.getElementById("totalPrecio").textContent = seleccionadas.size * PRECIO_FOTO
+
+}
+
+function verFoto(src){
+document.getElementById("modalImg").src = src
+document.getElementById("modalFoto").style.display="flex"
+}
+
+document.getElementById("modalFoto").onclick=function(){
+this.style.display="none"
+}
+
+</script>
+<div id="carritoFlotante">
+
+🛒 <span id="contadorFotos">0</span> fotos  
+Total: $<span id="totalPrecio">0</span>
+
+<button onclick="pagar()">Comprar</button>
+
+<script>
+
+const lazyImages = document.querySelectorAll(".lazy-img")
+
+const observer = new IntersectionObserver((entries,obs)=>{
+
+  entries.forEach(entry=>{
+
+    if(entry.isIntersecting){
+
+      const img = entry.target
+
+      img.src = img.dataset.src
+
+      obs.unobserve(img)
+
+    }
+
+  })
+
+},{
+  rootMargin:"200px"
+})
+
+lazyImages.forEach(img=>{
+  observer.observe(img)
+})
+
+</script>
+
+</div>
+</body>
+</html>

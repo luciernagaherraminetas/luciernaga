@@ -1,0 +1,758 @@
+from flask import Flask, render_template, request, jsonify, send_from_directory
+from flask import session, redirect, url_for
+import mercadopago
+import os
+import json
+import time
+import zipfile
+import tempfile
+import smtplib
+from email.message import EmailMessage
+from functools import wraps
+
+app = Flask(__name__)
+app.secret_key = "luciernaga_super_secret_key"
+
+# ==========================
+# PATHS (PRIMERO SIEMPRE)
+# ==========================
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+PREVIEW_FOLDER = os.path.join(BASE_DIR, "static","fotos_evento")
+ORIGINAL_FOLDER = os.path.join(BASE_DIR, "static","fotos_evento")
+
+DATA_DIR = os.path.join(BASE_DIR, "data")
+os.makedirs(DATA_DIR, exist_ok=True)
+
+EVENTOS_FILE = os.path.join(DATA_DIR, "eventos.json")
+PAGOS_FILE = os.path.join(DATA_DIR, "pagos.json")
+USERS_FILE = os.path.join(DATA_DIR, "users.json")
+VISITAS_FILE = os.path.join(DATA_DIR, "visitas.json")
+
+
+PRECIO_FOTO = 70.0
+
+PAQUETES = {
+    "3":{"cantidad": 3, "precio": 180},
+    "5":{"cantidad": 5, "precio": 280},
+    "album": {"cantidad": "ALL", "precio":3500}
+}
+
+# ==========================
+# MERCADO PAGO
+# ==========================
+
+sdk = mercadopago.SDK("TEST-8198243887256950-012513-327457108d00af59d6ef6368d64b84de-2543690401")
+
+# ==========================
+# EMAIL CONFIG
+# ==========================
+
+EMAIL_REMITENTE = "jmanuelphotographe@gmail.com"
+EMAIL_PASSWORD = "otghoylttvyvqxsg"
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
+
+# ==========================
+# ADMIN LOGIN
+# ==========================
+
+ADMIN_USER = "luciernaga"
+ADMIN_PASS = "manolo86"
+
+# ==========================
+# UTILIDADES
+# ==========================
+def login_required(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not session.get("admin"):
+            return redirect("/admin/login")
+        return f(*args, **kwargs)
+    return wrapper
+
+def load_json(path):
+    if not os.path.exists(path):
+        return {}
+
+    try:
+        with open(path, "r") as f:
+            contenido = f.read().strip()
+            if not contenido:
+                return {}
+            return json.loads(contenido)
+    except Exception as e:
+        print(f"⚠️ Error leyendo {path}: {e}")
+        return {}
+
+def save_json(path, data):
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+
+def admin_required(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if request.args.get("key") != "admin123":
+            return "Acceso denegado", 403
+        return f(*args, **kwargs)
+    return wrapper
+
+def evento_activo():
+    eventos = load_json(EVENTOS_FILE)
+    for slug, e in eventos.items():
+        if e.get("activo"):
+            return slug, e
+    return None, None
+
+def registrar_visitas_evento(slug):
+    visitas = load_json(VISITAS_FILE)
+
+    if slug not in visitas:
+        visitas[slug] = 0
+
+    visitas[slug] += 1
+
+    save_json(VISITAS_FILE, visitas)
+
+def contar_pagos_por_evento():
+    eventos = load_json(EVENTOS_FILE)
+    pagos = load_json(PAGOS_FILE)
+
+    conteo = {}
+
+    # Inicializar TODOS los eventos
+    for slug in eventos.keys():
+        conteo[slug] = {
+            "ventas": 0,
+            "fotos": 0
+        }
+
+    # Contar pagos
+    for pago in pagos.values():
+        fotos = pago.get("fotos", [])
+        if not fotos:
+            continue
+
+        # El pago pertenece al evento activo en ese momento
+        slug_activo, _ = evento_activo()
+        if not slug_activo:
+            continue
+
+        # 🔒 Protección extra
+        if slug_activo not in conteo:
+            conteo[slug_activo] = {"ventas": 0, "fotos": 0}
+
+        conteo[slug_activo]["ventas"] += 1
+        conteo[slug_activo]["fotos"] += len(fotos)
+
+    return conteo
+
+def pago_expirado(pago, horas=24):
+    ahora = int(time.time())
+    return ahora > pago["timestamp"] + (horas * 3600)
+
+def normalizar_originales(original_dir):
+    for root, dirs, files in os.walk(original_dir):
+        for f in files:
+            origen = os.path.join(root, f)
+            destino = os.path.join(original_dir, f)
+
+            if origen != destino and not os.path.exists(destino):
+                os.rename(origen, destino)
+
+    for root, dirs, files in os.walk(original_dir, topdown=False):
+        if root != original_dir and not os.listdir(root):
+            os.rmdir(root)
+
+from PIL import Image
+import os
+
+def generar_previews(original_dir, preview_dir):
+    LOGO_PATH = os.path.join(BASE_DIR, "static", "watermark", "logo.png")
+
+    LOGO_SCALE = 0.35   # tamaño relativo al ancho de la imagen
+    OPACIDAD = 60       # 🔥 más bajo = más transparente
+    MARGEN = 0          # centrado no necesita margen
+
+    if not os.path.exists(LOGO_PATH):
+        print("❌ Logo no encontrado:", LOGO_PATH)
+        return
+
+    for f in os.listdir(original_dir):
+        if not f.lower().endswith((".jpg", ".jpeg", ".png")):
+            continue
+
+        try:
+            img_path = os.path.join(original_dir, f)
+            preview_path = os.path.join(preview_dir, f)
+
+            with Image.open(img_path).convert("RGBA") as img:
+                img.thumbnail((900, 900))
+
+                with Image.open(LOGO_PATH).convert("RGBA") as logo:
+                    # 🔹 Redimensionar logo proporcional
+                    logo_w = int(img.size[0] * LOGO_SCALE)
+                    ratio = logo_w / logo.size[0]
+                    logo_h = int(logo.size[1] * ratio)
+                    logo = logo.resize((logo_w, logo_h), Image.LANCZOS)
+
+                    # 🔹 Ajustar opacidad
+                    alpha = logo.split()[3]
+                    alpha = alpha.point(lambda p: OPACIDAD)
+                    logo.putalpha(alpha)
+
+                    # 🎯 CENTRADO PERFECTO
+                    x = (img.size[0] - logo.size[0]) // 2
+                    y = (img.size[1] - logo.size[1]) // 2
+
+                    img.paste(logo, (x, y), logo)
+
+                img.convert("RGB").save(
+                    preview_path,
+                    "JPEG",
+                    quality=80,
+                    optimize=True
+                )
+
+        except Exception as e:
+            print("⚠ Error en preview:", f, e)
+
+# ==========================
+# ZIP
+# ==========================
+import zipfile
+import tempfile
+import os
+
+def crear_zip(payment_id, fotos, carpeta):
+    temp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+    zip_path = temp.name
+    temp.close()
+
+    originales = os.path.join(ORIGINAL_FOLDER, carpeta)
+
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        for foto in fotos:
+            ruta = os.path.join(originales, foto)
+            if os.path.exists(ruta):
+                zipf.write(ruta, arcname=foto)
+
+    return zip_path
+
+@app.route("/descargar-zip/<payment_id>")
+def descargar_zip(payment_id):
+    pagos = load_json(PAGOS_FILE)
+
+    if payment_id not in pagos:
+        return "Pago no válido", 403
+
+    pago = pagos[payment_id]
+
+    # ⏱️ Expiración
+    if pago_expirado(pago):
+        return "⏳ El enlace de descarga ha expirado", 403
+
+    # 🔒 (opcional) solo 1 descarga
+    if pago.get("descargado"):
+        return "⚠️ El ZIP ya fue descargado", 403
+
+    fotos = pagos[payment_id]["fotos"]
+
+    slug, evento = evento_activo()
+    carpeta = evento["carpeta"]
+
+    zip_path = crear_zip(payment_id, fotos, carpeta)
+
+    # marcar como descargado
+    pago["descargado"] = True
+    save_json(PAGOS_FILE, pagos)
+
+    return send_from_directory(
+        os.path.dirname(zip_path),
+        os.path.basename(zip_path),
+        as_attachment=True
+    )
+
+# ==========================
+# EMAIL
+# ==========================
+def enviar_email(destinatario, zip_path, payment_id):
+    msg = EmailMessage()
+    msg["Subject"] = "📸 Tus fotos – Luciérnaga"
+    msg["From"] = EMAIL_REMITENTE
+    msg["To"] = destinatario
+
+    # Texto plano (fallback)
+    msg.set_content("Tu cliente de correo no soporta HTML")
+
+    # HTML bonito
+    msg.add_alternative(f"""
+    <html>
+      <body style="font-family: Arial; background:#0f172a; color:#e5e7eb; padding:30px">
+        <div 
+style="max-width:600px;margin:auto;background:#020617;padding:30px;border-radius:12px">
+          <h2 style="color:#22c55e">📸 Gracias por tu compra</h2>
+
+          <p>Hola 👋</p>
+
+          <p>
+            Gracias por confiar en <strong>Luciérnaga</strong>.<br>
+            Adjuntamos tus fotos en un archivo ZIP.
+          </p>
+
+          <p>
+            ⏱️ El enlace expira en <strong>24 horas</strong><br>
+            🆔 ID de pago: <strong>{payment_id}</strong>
+          </p>
+
+          <p style="margin-top:30px;color:#94a3b8">
+            — Luciérnaga 📸<br>
+            Fotografía deportiva
+          </p>
+        </div>
+      </body>
+    </html>
+    """, subtype="html")
+
+    # Adjuntar ZIP
+    with open(zip_path, "rb") as f:
+        msg.add_attachment(
+            f.read(),
+            maintype="application",
+            subtype="zip",
+            filename=f"fotos_{payment_id}.zip"
+        )
+
+    with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+        server.starttls()
+        server.login(EMAIL_REMITENTE, EMAIL_PASSWORD)
+        server.send_message(msg)
+
+# ==========================
+# RUTAS
+# ==========================
+
+@app.route("/admin/logout")
+def admin_logout():
+    session.clear()
+    return redirect("/admin/login")
+
+@app.route("/admin", strict_slashes=False)
+@login_required
+def admin():
+    return render_template("admin.html")
+
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    error = None
+
+    if request.method == "POST":
+        user = request.form.get("usuario")
+        password = request.form.get("password")
+
+        if user == ADMIN_USER and password == ADMIN_PASS:
+            session["admin"] = True
+            return redirect("/admin/dashboard")
+        else:
+            error = "Credenciales incorrectas"
+
+    return render_template("admin_login.html", error=error)
+
+@app.route("/")
+def index():
+    slug, evento = evento_activo()
+
+    if not evento:
+        return "No hay evento activo", 503
+    registrar_visitas_evento(slug)
+
+    carpeta = evento["carpeta"]
+    precio = evento.get("precio_foto", PRECIO_FOTO)
+
+    preview_folder = os.path.join(
+        BASE_DIR,
+        "static",
+        "fotos_evento",
+        carpeta,
+        "preview"
+    )
+
+    fotos = []
+    if os.path.exists(preview_folder):
+        fotos = sorted(
+            f for f in os.listdir(preview_folder)
+            if f.lower().endswith((".jpg", ".jpeg", ".png"))
+        )
+
+    return render_template(
+        "index.html",
+        fotos=fotos,
+        evento=evento,
+        precio=precio
+    )
+
+@app.route("/verificar-pago/<payment_id>")
+def verificar_pago(payment_id):
+    pagos = load_json(PAGOS_FILE)
+
+    if payment_id not in pagos:
+        return jsonify({"aprobado": False})
+
+    return jsonify({
+        "aprobado": True,
+        "fotos": pagos[payment_id]["fotos"]
+    })
+
+@app.route("/gracias")
+def gracias():
+    payment_id = request.args.get("payment_id")
+
+    if not payment_id:
+        return "Pago sin ID"
+
+    payment = sdk.payment().get(payment_id)
+    info = payment.get("response", {})
+
+    print("🔎 PAGO:", info)
+
+    if info.get("status") != "approved":
+        return "Pago no aprobado"
+
+    pagos = load_json(PAGOS_FILE)
+
+    if payment_id not in pagos:
+        fotos = info.get("external_reference", "").split(",")
+        email = info.get("payer", {}).get("email", "sin-email")
+
+        pagos[payment_id] = {
+            "email": email,
+            "fotos": fotos,
+            "timestamp": int(time.time()),
+            "descargado": False
+        }
+
+        save_json(PAGOS_FILE, pagos)
+        print("✅ PAGO GUARDADO DESDE /gracias")
+
+    return render_template("gracias.html", payment_id=payment_id)
+
+@app.route("/error")
+def error():
+    return "❌ Pago rechazado"
+
+@app.route("/pendiente")
+def pendiente():
+    return "⏳ Pago pendiente"
+
+@app.route("/descargar/<payment_id>/<foto>")
+def descargar(payment_id, foto):
+    pagos = load_json(PAGOS_FILE)
+
+    if payment_id not in pagos:
+        return "Pago no válido", 403
+
+    pago = pagos[payment_id]
+
+    # ⏱️ Verificar expiración
+    if pago_expirado(pago):
+        return "⏳ El enlace de descarga ha expirado", 403
+
+    slug, evento = evento_activo()
+    carpeta = evento["carpeta"]
+
+    return send_from_directory(
+        os.path.join(ORIGINAL_FOLDER, carpeta),
+        foto,
+        as_attachment=True
+    )
+@app.route("/admin/subir-album", methods=["GET", "POST"])
+@login_required
+def subir_album():
+    if request.method == "GET":
+        return render_template("admin_subir_album.html")
+
+    nombre = request.form.get("nombre")
+    carpeta = request.form.get("carpeta")
+    archivo = request.files.get("zip")
+
+    if not nombre or not carpeta or not archivo:
+        return "Faltan datos", 400
+
+    base_evento = os.path.join(BASE_DIR, "static", "fotos_evento", carpeta)
+    preview_dir = os.path.join(base_evento, "preview")
+    original_dir = os.path.join(base_evento, "originales")
+
+    os.makedirs(preview_dir, exist_ok=True)
+    os.makedirs(original_dir, exist_ok=True)
+
+    zip_path = os.path.join(base_evento, "fotos.zip")
+    archivo.save(zip_path)
+
+    with zipfile.ZipFile(zip_path, "r") as zipf:
+        zipf.extractall(original_dir)
+
+    os.remove(zip_path)
+
+    # 🔥 ESTAS DOS LÍNEAS SON CLAVE
+    normalizar_originales(original_dir)
+    generar_previews(original_dir, preview_dir)
+
+    eventos = load_json(EVENTOS_FILE)
+    eventos[carpeta] = {
+        "nombre": nombre,
+        "carpeta": carpeta,
+        "precio_foto": PRECIO_FOTO,
+        "activo": False
+    }
+    save_json(EVENTOS_FILE, eventos)
+
+    return redirect("/admin/dashboard")
+
+# ==========================
+# CREAR PREFERENCIA
+# ==========================
+@app.route("/crear-preferencia", methods=["POST"])
+def crear_preferencia():
+    try:
+        data = request.get_json()
+        print("DATA RECIBIDA:", data)
+
+        fotos = data.get("seleccionadas", [])
+        if not fotos:
+            return jsonify({"error": "No hay fotos"}), 400
+
+        items = []
+        for f in fotos:
+            items.append({
+                "title": f"Foto deportiva {f}",
+                "quantity": 1,
+                "currency_id": "MXN",
+                "unit_price": 70.0
+            })
+
+        print("ITEMS:", items)
+
+        preference_data = {
+            "items": items,
+            "external_reference": ",".join(fotos),
+            "notification_url": "https://jose-includible-janell.ngrok-free.dev/webhook",
+            "back_urls": {
+                "success": "https://jose-includible-janell.ngrok-free.dev/gracias",
+                "failure": "https://jose-includible-janell.ngrok-free.dev/",
+                "pending": "https://jose-includible-janell.ngrok-free.dev/"
+            }
+        }
+
+        pref = sdk.preference().create(preference_data)
+        print("RESPUESTA MP:", pref)
+
+        if "response" not in pref or "init_point" not in pref["response"]:
+            return jsonify({"error": "MercadoPago no devolvió init_point"}), 500
+
+        return jsonify({
+            "init_point": pref["response"]["init_point"]
+        })
+
+    except Exception as e:
+        print("❌ ERROR MP:", e)
+        return jsonify({"error": str(e)}), 500
+
+# ==========================
+# WEBHOOK
+# ==========================
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    try:
+        print("🚨 WEBHOOK LLAMADO")
+        print("HEADERS:", dict(request.headers))
+        print("BODY:", request.data)
+
+        data = request.get_json(force=True, silent=True) or {}
+
+        # MercadoPago envía el ID aquí
+        payment_id = (
+            data.get("data", {}).get("id")
+            or data.get("id")
+        )
+
+        if not payment_id:
+            return "OK", 200  # webhook vacío, MP a veces manda pings
+
+        # 🔎 Consultar pago real a MP
+        pago_mp = sdk.payment().get(payment_id)
+
+        if "response" not in pago_mp:
+            return "OK", 200
+
+        info = pago_mp["response"]
+
+        # Solo pagos aprobados
+        if info.get("status") != "approved":
+            return "OK", 200
+
+        fotos = info.get("external_reference", "").split(",")
+        email = info.get("payer", {}).get("email", "")
+
+        pagos = load_json(PAGOS_FILE)
+
+        pagos[str(payment_id)] = {
+            "email": email,
+            "fotos": fotos,
+            "timestamp": int(time.time()),
+            "descargado": False
+        }
+
+        save_json(PAGOS_FILE, pagos)
+
+        print("✅ PAGO REGISTRADO:", payment_id)
+        return "OK", 200
+
+    except Exception as e:
+        print("❌ ERROR WEBHOOK:", e)
+        return "ERROR", 500
+
+# ==========================
+# ADMIN
+# ==========================
+
+@app.route("/admin/dashboard")
+@login_required
+def admin_dashboard():
+    eventos = load_json(EVENTOS_FILE)
+    slug_activo, _ = evento_activo()
+    conteo = contar_pagos_por_evento()
+
+    return render_template(
+        "admin_dashboard.html",
+        eventos=eventos,
+        activo=slug_activo,
+        conteo=conteo
+    )
+
+@app.route("/admin/activar-evento/<slug>", methods=["POST"])
+@login_required
+def activar_evento(slug):
+    slug = slug.strip()  # 🧼 quitar espacios extra
+
+    eventos = load_json(EVENTOS_FILE)
+
+    if slug not in eventos:
+        return "Evento no existe", 404
+
+    # 🔁 desactivar todos
+    for s in eventos:
+        eventos[s]["activo"] = False
+
+    # ✅ activar seleccionado
+    eventos[slug]["activo"] = True
+
+    save_json(EVENTOS_FILE, eventos)
+
+    return redirect("/admin/dashboard")
+
+
+@app.route("/admin/evento/<slug>")
+@login_required
+def admin_evento(slug):
+    eventos = load_json(EVENTOS_FILE)
+
+    if slug not in eventos:
+        return "Evento no encontrado", 404
+
+    evento = eventos[slug]
+    carpeta = evento.get("carpeta")
+
+    preview_folder = os.path.join(
+        BASE_DIR,
+        "static",
+        "fotos_evento",
+        carpeta,
+        "preview"
+    )
+
+    fotos = []
+    if os.path.exists(preview_folder):
+        fotos = sorted(
+            f for f in os.listdir(preview_folder)
+            if f.lower().endswith((".jpg", ".jpeg", ".png"))
+        )
+
+    return render_template(
+        "admin_evento.html",
+        evento=evento,
+        fotos=fotos,
+        slug=slug
+    )
+
+@app.route("/admin/pagos")
+@login_required
+def admin_pagos():
+    pagos = load_json(PAGOS_FILE)
+
+    pagos_ordenados = dict(
+        sorted(
+            pagos.items(),
+            key=lambda x: x[1]["timestamp"],
+            reverse=True
+        )
+    )
+
+    return render_template("admin_pagos.html", pagos=pagos_ordenados)
+
+
+@app.route("/admin/reenviar/<payment_id>")
+@login_required
+def reenviar_pago(payment_id):
+    pagos = load_json(PAGOS_FILE)
+
+    if payment_id not in pagos:
+        return "Pago no encontrado", 404
+
+    pago = pagos[payment_id]
+    slug, evento = evento_activo()
+    carpeta = evento["carpeta"]
+
+    zip_path = crear_zip(payment_id, pago["fotos"], carpeta)
+    enviar_email(pago["email"], zip_path, payment_id)
+    os.remove(zip_path)
+
+    return redirect("/admin/pagos")
+
+# ==========================
+# ELIMINAR EVENTO
+# ==========================
+
+import shutil 
+
+@app.route("/admin/eliminar-evento/<slug>", methods=["POST"])
+@login_required
+def eliminar_evento(slug):
+    slug = slug.strip()  # 🧼 limpiar espacios
+
+    eventos = load_json(EVENTOS_FILE)
+
+    if slug not in eventos:
+        return "Evento no encontrado", 404
+
+    carpeta = eventos[slug].get("carpeta")
+
+    # 📁 borrar carpeta física del evento
+    if carpeta:
+        ruta = os.path.join(BASE_DIR, "static", "fotos_evento", carpeta)
+        if os.path.exists(ruta):
+            shutil.rmtree(ruta)
+
+    # 🗑 borrar del JSON
+    del eventos[slug]
+    save_json(EVENTOS_FILE, eventos)
+
+    return redirect("/admin/dashboard")
+
+# ==========================
+# MAIN
+# ==========================
+
+if __name__ == "__main__":
+    app.run(debug=True)
+

@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Galería del Evento</title>
+
+    <!-- FACE API -->
+    <script defer 
+src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #111;
+            color: #fff;
+            text-align: center;
+        }
+        .galeria {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 15px;
+            padding: 20px;
+        }
+        .foto {
+            border: 2px solid #333;
+            padding: 5px;
+        }
+        img {
+            width: 100%;
+            cursor: pointer;
+        }
+        .seleccionada {
+            border: 3px solid #00ff88;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            margin: 10px;
+        }
+        a.descarga {
+            color: #00ff88;
+            display: block;
+            margin: 10px;
+            text-decoration: none;
+            font-size: 18px;
+        }
+    </style>
+</head>
+
+<body>
+
+<h1>📸 Fotos del Evento</h1>
+
+<!-- BUSCADOR POR NÚMERO -->
+<input
+  type="text"
+  id="buscador"
+  placeholder="Buscar por número"
+  oninput="buscarNumero()"
+>
+
+<hr>
+
+<!-- BUSCADOR POR SELFIE -->
+<input type="file" id="selfieInput" accept="image/*">
+<button onclick="buscarPorSelfie()">Buscar por Selfie</button>
+
+<hr>
+
+<button onclick="pagar()">💳 Pagar fotos seleccionadas</button>
+
+<!-- 🔽 DESCARGAS (OCULTO HASTA PAGO) -->
+<div id="descargas" style="display:none; margin-top:30px;">
+    <h2>✅ Descargas disponibles</h2>
+    <div id="listaDescargas"></div>
+</div>
+
+<div class="galeria" id="galeria">
+    {% for foto in fotos %}
+    <div class="foto">
+        <img
+          src="{{ url_for('static', filename='fotos_evento/preview/' + foto) }}"
+          data-nombre="{{ foto }}"
+          onclick="toggleSeleccion(this)">
+    </div>
+    {% endfor %}
+</div>
+
+<script>
+/* =========================
+   SELECCIÓN DE FOTOS
+========================= */
+const seleccionadas = new Set();
+let modelosCargados = false;
+
+function toggleSeleccion(img) {
+    const nombre = img.dataset.nombre;
+    if (seleccionadas.has(nombre)) {
+        seleccionadas.delete(nombre);
+        img.classList.remove("seleccionada");
+    } else {
+        seleccionadas.add(nombre);
+        img.classList.add("seleccionada");
+    }
+}
+
+/* =========================
+   BUSCADOR POR NÚMERO
+========================= */
+function buscarNumero() {
+    const texto = document.getElementById("buscador").value.toLowerCase();
+    document.querySelectorAll(".galeria img").forEach(img => {
+        const mostrar =
+          texto === "" || img.dataset.nombre.toLowerCase().includes(texto);
+        img.parentElement.style.display = mostrar ? "block" : "none";
+    });
+}
+
+/* =========================
+   FACE API
+========================= */
+async function cargarModelos() {
+    if (modelosCargados) return;
+
+    await faceapi.nets.tinyFaceDetector.loadFromUri('/static/models');
+    await faceapi.nets.faceLandmark68Net.loadFromUri('/static/models');
+    await faceapi.nets.faceRecognitionNet.loadFromUri('/static/models');
+
+    modelosCargados = true;
+}
+
+async function buscarPorSelfie() {
+    await cargarModelos();
+
+    const input = document.getElementById("selfieInput");
+    if (!input.files.length) {
+        alert("Sube una selfie primero");
+        return;
+    }
+
+    const selfie = await faceapi.bufferToImage(input.files[0]);
+    const selfieDesc = await faceapi
+        .detectSingleFace(selfie, new faceapi.TinyFaceDetectorOptions())
+        .withFaceLandmarks()
+        .withFaceDescriptor();
+
+    if (!selfieDesc) {
+        alert("No se detectó rostro en la selfie");
+        return;
+    }
+
+    const imgs = document.querySelectorAll(".galeria img");
+    for (const img of imgs) {
+        const imagen = await faceapi.fetchImage(img.src);
+        const desc = await faceapi
+            .detectSingleFace(imagen, new faceapi.TinyFaceDetectorOptions())
+            .withFaceLandmarks()
+            .withFaceDescriptor();
+
+        if (!desc) {
+            img.parentElement.style.display = "none";
+            continue;
+        }
+
+        const distancia = faceapi.euclideanDistance(
+            selfieDesc.descriptor,
+            desc.descriptor
+        );
+
+        img.parentElement.style.display = distancia < 0.6 ? "block" : "none";
+    }
+}
+
+/* =========================
+   PAGO MERCADO PAGO
+========================= */
+async function pagar() {
+    if (seleccionadas.size === 0) {
+        alert("Selecciona al menos una foto");
+        return;
+    }
+
+    const res = await fetch("/crear-preferencia", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            seleccionadas: Array.from(seleccionadas)
+        })
+    });
+
+    const data = await res.json();
+
+    if (!data.init_point) {
+        alert("Error al crear el pago");
+        return;
+    }
+
+    window.location.href = data.init_point;
+}
+
+/* =========================
+   MOSTRAR DESCARGAS POST-PAGO
+========================= */
+function mostrarDescargas(payment_id, fotos) {
+    const contenedor = document.getElementById("descargas");
+    const lista = document.getElementById("listaDescargas");
+
+    lista.innerHTML = "";
+
+    fotos.forEach(foto => {
+        const a = document.createElement("a");
+        a.href = `/descargar/${payment_id}/${foto}`;
+        a.textContent = `⬇ Descargar ${foto}`;
+        a.className = "descarga";
+        a.target = "_blank";
+        lista.appendChild(a);
+    });
+
+    contenedor.style.display = "block";
+}
+
+/* =========================
+   DETECTAR RETORNO DE PAGO
+========================= */
+const params = new URLSearchParams(window.location.search);
+const paymentId = params.get("payment_id");
+
+if (paymentId) {
+    fetch(`/verificar-pago/${paymentId}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.aprobado) {
+                mostrarDescargas(paymentId, data.fotos);
+            }
+        });
+}
+</script>
+
+</body>
+</html>
+

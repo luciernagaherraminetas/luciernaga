@@ -1,0 +1,20 @@
+{
+  "tierra blanca ": {
+    "nombre": "cancun",
+    "carpeta": "tierra blanca ",
+    "precio_foto": 70.0,
+    "activo": false
+  },
+  "alonso": {
+    "nombre": "juan",
+    "carpeta": "alonso",
+    "precio_foto": 70.0,
+    "activo": false
+  },
+  "Veracruz": {
+    "nombre": "5K",
+    "carpeta": "Veracruz",
+    "precio_foto": 70.0,
+    "activo": true
+  }
+}

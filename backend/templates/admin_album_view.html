@@ -1,0 +1,40 @@
+{% extends "admin.html" %}
+{% block content %}
+
+<h2>👁 Vista previa – {{ album.nombre }}</h2>
+
+<p>
+  <strong>Lugar:</strong> {{ album.lugar }} <br>
+  <strong>Fotos:</strong> {{ album.fotos }} <br>
+  <strong>Estado:</strong>
+  {% if album.activo %}
+    🟢 Activo
+  {% else %}
+    🔴 Inactivo
+  {% endif %}
+</p>
+
+<a href="/admin/albums" style="display:inline-block; margin-bottom:20px;">
+  ← Volver a álbumes
+</a>
+
+<div style="
+  display:grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap:15px;
+">
+  {% for foto in fotos %}
+    <div>
+      <img
+        src="/static/fotos_evento/{{ slug }}/preview/{{ foto }}"
+        style="width:100%; border-radius:6px;"
+      >
+    </div>
+  {% endfor %}
+</div>
+
+{% if not fotos %}
+  <p>No hay fotos preview en este álbum.</p>
+{% endif %}
+
+{% endblock %}

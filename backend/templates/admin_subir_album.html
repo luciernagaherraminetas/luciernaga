@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Subir Álbum</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #111;
+      color: #eee;
+      margin: 0;
+      padding: 20px;
+    }
+
+    h2 {
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      margin-top: 10px;
+    }
+
+    input, button {
+      margin-top: 5px;
+      padding: 8px;
+      width: 300px;
+      max-width: 100%;
+    }
+
+    button {
+      background: #7fff00;
+      border: none;
+      cursor: pointer;
+      font-weight: bold;
+    }
+
+    button:hover {
+      opacity: 0.9;
+    }
+
+    .volver {
+      display: inline-block;
+      margin-top: 20px;
+      color: #7fff00;
+      text-decoration: none;
+    }
+  </style>
+</head>
+
+<body>
+
+<h2>📂 Subir nuevo álbum</h2>
+
+<form method="POST" action="/admin/albums/upload" enctype="multipart/form-data">
+    <label>Nombre del evento</label>
+    <input type="text" name="nombre" required>
+
+    <label>Lugar</label>
+    <input type="text" name="lugar" required>
+
+    <label>Slug / carpeta (ej: maraton_puebla_2026)</label>
+    <input type="text" name="carpeta" required>
+
+    <label>ZIP con fotos</label>
+    <input type="file" name="zip" accept=".zip" required>
+
+    <br><br>
+    <button type="submit">🚀 Subir álbum</button>
+</form>
+
+<a class="volver" href="/admin">← Volver al admin</a>
+
+<hr>
+
+<h3>📁 Álbumes existentes</h3>
+
+{% if albums %}
+  <ul>
+    {% for album in albums %}
+      <li>{{ album }}</li>
+    {% endfor %}
+  </ul>
+{% else %}
+  <p>No hay álbumes todavía</p>
+{% endif %}
+
+</body>
+</html>

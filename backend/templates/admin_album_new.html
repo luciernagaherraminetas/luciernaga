@@ -1,0 +1,242 @@
+{% extends "admin.html" %}
+{% block content %}
+
+<h2>➕ Agregar álbum</h2>
+
+<form id="albumForm"
+      enctype="multipart/form-data"
+      style="max-width:500px;">
+
+  <label>Nombre del evento</label><br>
+  <input type="text" name="nombre" required><br><br>
+
+  <label>Slug / carpeta</label><br>
+  <input type="text" name="carpeta" required><br><br>
+
+  <label>Lugar</label><br>
+  <input type="text" name="lugar" required><br><br>
+
+<div class="fila">
+
+  <div class="campo">
+    <label>Fecha del evento</label><br>
+    <input type="date" name="fecha">
+  </div>
+
+  <div class="campo">
+    <label>Precio por foto</label><br>
+    <input
+      type="number"
+      step="1"
+      name="precio"
+      placeholder="Precio por foto"
+      required>
+  </div>
+
+</div>
+
+<br>
+
+  <label>Foto de portada</label><br>
+  <input type="file"
+         name="portada"
+         accept="image/jpeg,image/png,image/webp">
+  <br><br>
+
+  <label>ZIP con fotos</label><br>
+  <input type="file" name="zip" accept=".zip" required><br><br>
+
+<!-- SUBIENDO ZIP -->
+<label>Subiendo archivo</label>
+
+<div class="progress-container">
+  <div id="uploadBar" class="progress-bar"></div>
+</div>
+
+<div id="uploadPercent" class="progress-text">0%</div>
+
+<br>
+
+<!-- PROCESANDO FOTOS -->
+<label>Procesando fotos</label>
+
+<div class="progress-container">
+  <div id="processBar" class="progress-bar process"></div>
+</div>
+
+<div id="processText" class="progress-text">
+Esperando subida...
+</div>
+
+<br>
+
+<button type="submit"
+        style="padding:8px 14px; background:#22c55e; border:none; border-radius:6px; font-weight:bold;">
+  🚀 Subir álbum
+</button>
+
+<a href="/admin/albums" style="margin-left:15px; color:#38bdf8;">
+Cancelar
+</a>
+
+<p style="opacity:.7; margin-top:10px;">
+⏳ Álbumes grandes pueden tardar varios minutos.
+</p>
+
+</form>
+
+
+<style>
+
+.fila{
+  display:flex;
+  gap:50px;
+  align-items:flex-end;
+}
+
+.campo{
+  display:flex;
+  flex-direction:column;
+}
+
+.campo input{
+  min-width:180px;
+}
+
+.progress-container{
+width:100%;
+height:16px;
+background:#1e293b;
+border-radius:8px;
+overflow:hidden;
+margin-top:6px;
+}
+
+.progress-bar{
+width:0%;
+height:100%;
+background:#22c55e;
+transition:width .3s;
+}
+
+.progress-bar.process{
+background:#facc15;
+}
+
+.progress-text{
+margin-top:6px;
+color:#9ca3af;
+font-size:14px;
+}
+
+</style>
+
+
+<script>
+
+const form = document.getElementById("albumForm")
+
+const uploadBar = document.getElementById("uploadBar")
+const uploadPercent = document.getElementById("uploadPercent")
+
+const processBar = document.getElementById("processBar")
+const processText = document.getElementById("processText")
+
+form.addEventListener("submit", function(e){
+
+e.preventDefault()
+
+const formData = new FormData(form)
+const xhr = new XMLHttpRequest()
+
+xhr.open("POST","/admin/albums/upload",true)
+
+function monitorearProcesamiento(){
+
+const interval = setInterval(async ()=>{
+
+const res = await fetch("/admin/progreso-procesamiento")
+const progreso = await res.json()
+
+if(progreso.total > 0){
+
+const percent = Math.round((progreso.actual / progreso.total) * 100)
+
+processBar.style.width = percent + "%"
+
+processText.innerText =
+"Procesando foto " + progreso.actual + " de " + progreso.total
+
+}
+
+if(progreso.actual >= progreso.total && progreso.total > 0){
+clearInterval(interval)
+}
+
+},1000)
+
+}
+
+
+/* PROGRESO SUBIDA */
+
+xhr.upload.onprogress = function(e){
+
+if(e.lengthComputable){
+
+const percent = Math.round((e.loaded / e.total) * 100)
+
+uploadBar.style.width = percent + "%"
+uploadPercent.innerText = percent + "%"
+
+if(percent === 100){
+processText.innerText = "📸 Procesando fotos..."
+monitorearProcesamiento()
+}
+
+}
+
+}
+
+
+/* TERMINA SUBIDA */
+
+xhr.onload = function(){
+
+if(xhr.status === 204){
+
+processBar.style.width = "100%"
+processText.innerText = "✅ Álbum procesado"
+
+setTimeout(()=>{
+window.location.href="/admin/albums"
+},1500)
+
+}else{
+
+alert("Error al subir álbum")
+
+}
+
+}
+
+
+/* ERROR RED */
+
+xhr.onerror = function(){
+
+processText.innerText = "⚙️ El servidor sigue procesando..."
+
+setTimeout(()=>{
+window.location.href="/admin/albums"
+},3000)
+
+}
+
+xhr.send(formData)
+
+})
+
+</script>
+
+{% endblock %}

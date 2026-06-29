@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard Admin</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <style>
+        body {
+            background: #020617;
+            color: #e5e7eb;
+            font-family: Arial, sans-serif;
+            padding: 30px;
+        }
+        h1 { color: #22c55e; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            padding: 14px;
+            border-bottom: 1px solid #1e293b;
+            text-align: left;
+        }
+        th { color: #22c55e; }
+        .btn {
+            padding: 8px 14px;
+            background: #22c55e;
+            color: #022c22;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: bold;
+            border: none;
+            cursor: pointer;
+        }
+        .activo {
+            color: #22c55e;
+            font-weight: bold;
+  }
+</style>
+</head>
+<body>
+<h1>Eventos</h1>
+
+<div style="margin:20px 0;">
+  <a href="{{ url_for('subir_album') }}" class="btn" style="margin-left:10px;">
+    ➕ Subir Álbum
+  </a>
+</div>
+
+{% if eventos %}
+<table style="width:100%; border-collapse: collapse; margin-top:20px;">
+  <thead>
+    <tr style="color:#6aff6a; border-bottom:1px solid #333;">
+      <th>Slug</th>
+      <th>Nombre</th>
+      <th>Carpeta</th>
+      <th>Ingresos</th>
+      <th>Estado</th>
+      <th>Acciones</th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for slug, evento in eventos.items() %}
+    <tr style="border-bottom:1px solid #222;">
+      <td>{{ slug }}</td>
+      <td>{{ evento.nombre }}</td>
+      <td>{{ evento.carpeta }}</td>
+      <td>
+    💰 ${{ resumen[slug].total }} MXN<br>
+    📦 {{ resumen[slug].ventas }} ventas
+      </td>
+      <td align="center">
+        {% if evento.activo %}
+          🟢 Activo
+        {% else %}
+          ⚪ Inactivo
+        {% endif %}
+      </td>
+
+      <td align="center">
+        <form
+          action="{{ url_for('activar_evento', slug=slug) }}"
+          method="POST"
+          style="display:inline;"
+        >
+          <button>Activar</button>
+        </form>
+        
+        <a href="{{ url_for('admin_evento', slug=slug) }}" class="btn">
+        <button>Ver</button>
+        </a>
+        <a href="{{ url_for('admin_pagos_evento', slug=slug) }}" class="btn">
+            💳 Pagos
+        </a>
+        <a href="{{ url_for('admin_pagos', slug=slug) }}">
+          <button style="background:#2563eb;color:white;">💳 Pagos</button>
+        </a>
+
+        <form
+          action="{{ url_for('eliminar_evento', slug=slug) }}"
+          method="POST"
+          style="display:inline;"
+          onsubmit="return confirm('¿Eliminar este evento?')"
+        >
+          <button style="background:red;color:white;">
+            🗑 Eliminar
+          </button>
+        </form>
+
+        <div style="font-size:13px;color:#94a3b8;">
+            👁 {{ evento.visitas or 0 }} visitas
+        </div>
+     </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% else %}
+  <p style="margin-top:20px; color:#aaa;">
+    No hay eventos registrados
+  </p>
+{% endif %}
+
+</body>
+</html>
+

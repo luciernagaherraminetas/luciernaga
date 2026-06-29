@@ -1,0 +1,150 @@
+{% extends "admin.html" %}
+{% block content %}
+
+<h2>➕ Agregar fotos al álbum</h2>
+
+<p>
+Evento:
+<strong>{{ album.nombre }}</strong>
+</p>
+
+<p style="opacity:.8;">
+Las fotos nuevas se agregarán al álbum existente sin borrar las anteriores.
+</p>
+
+<form id="agregarFotosForm"
+      enctype="multipart/form-data">
+
+    <label>ZIP con fotos nuevas</label>
+    <br><br>
+
+    <input type="file"
+           name="zip"
+           accept=".zip"
+           required>
+
+    <br><br>
+
+    <label>Subiendo archivo</label>
+
+    <div class="progress-container">
+        <div id="uploadBar" class="progress-bar"></div>
+    </div>
+
+    <div id="uploadPercent" class="progress-text">
+        0%
+    </div>
+
+    <br>
+
+    <button type="submit"
+            style="
+                padding:10px 18px;
+                background:#22c55e;
+                border:none;
+                border-radius:6px;
+                font-weight:bold;
+                cursor:pointer;
+            ">
+        🚀 Agregar fotos
+    </button>
+
+    <a href="/admin/albums"
+       style="
+           margin-left:15px;
+           color:#38bdf8;
+           text-decoration:none;
+       ">
+       Cancelar
+    </a>
+
+</form>
+
+<style>
+
+.progress-container{
+    width:100%;
+    max-width:600px;
+    height:18px;
+    background:#1e293b;
+    border-radius:8px;
+    overflow:hidden;
+    margin-top:8px;
+}
+
+.progress-bar{
+    width:0%;
+    height:100%;
+    background:#22c55e;
+    transition:width .3s;
+}
+
+.progress-text{
+    margin-top:8px;
+    color:#9ca3af;
+}
+
+</style>
+
+<script>
+
+const form = document.getElementById("agregarFotosForm")
+
+const uploadBar = document.getElementById("uploadBar")
+const uploadPercent = document.getElementById("uploadPercent")
+
+form.addEventListener("submit", function(e){
+
+    e.preventDefault()
+
+    const formData = new FormData(form)
+
+    const xhr = new XMLHttpRequest()
+
+    xhr.open(
+        "POST",
+        window.location.pathname,
+        true
+    )
+
+    xhr.upload.onprogress = function(e){
+
+        if(e.lengthComputable){
+
+            const percent = Math.round(
+                (e.loaded / e.total) * 100
+            )
+
+            uploadBar.style.width =
+                percent + "%"
+
+            uploadPercent.innerText =
+                percent + "%"
+
+        }
+
+    }
+
+    xhr.onload = function(){
+
+        uploadBar.style.width = "100%"
+
+        uploadPercent.innerText =
+            "✅ Fotos agregadas correctamente"
+
+        setTimeout(() => {
+
+            window.location.href =
+                "/admin/albums"
+
+        }, 1000)
+
+    }
+
+    xhr.send(formData)
+
+})
+
+</script>
+
+{% endblock %}

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Admin Evento – Luciérnaga</title>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #111;
+      color: #eee;
+      margin: 0;
+      padding: 20px;
+    }
+
+    h1 {
+      margin-bottom: 20px;
+    }
+
+    .galeria {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 15px;
+    }
+
+    .foto {
+      width: 100%;
+      cursor: pointer;
+      border-radius: 6px;
+      transition: transform 0.2s;
+    }
+
+    .foto:hover {
+      transform: scale(1.05);
+    }
+
+    /* MODAL */
+    .modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      justify-content: center;
+      align-items: center;
+      z-index: 999;
+    }
+
+    .modal img {
+      max-width: 90%;
+      max-height: 90%;
+      border-radius: 8px;
+    }
+
+    .close {
+      position: absolute;
+      top: 20px;
+      right: 30px;
+      font-size: 32px;
+      cursor: pointer;
+      color: #fff;
+    }
+
+    .volver {
+      display: inline-block;
+      margin-bottom: 15px;
+      color: #7fff00;
+      text-decoration: none;
+    }
+  </style>
+</head>
+
+<body>
+
+  <a href="/admin/dashboard" class="volver">← Volver al dashboard</a>
+
+  <h1>Evento: {{ evento.nombre }}</h1>
+
+  {% if fotos %}
+    <div class="galeria">
+      {% for foto in fotos %}
+        <img
+          src="{{ url_for('static', filename='fotos_evento/' ~ evento.carpeta ~ '/preview/' ~ foto) }}"
+          class="foto"
+          onclick="abrirPreview(this.src)"
+          alt="foto"
+        >
+      {% endfor %}
+    </div>
+  {% else %}
+    <p>No hay fotos en este evento.</p>
+  {% endif %}
+
+  <!-- MODAL PREVIEW -->
+  <div id="previewModal" class="modal">
+    <span class="close" onclick="cerrarPreview()">×</span>
+    <img id="imgPreview">
+  </div>
+
+  <script>
+    function abrirPreview(src) {
+      const modal = document.getElementById("previewModal");
+      const img = document.getElementById("imgPreview");
+
+      img.src = src;
+      modal.style.display = "flex";
+    }
+
+    function cerrarPreview() {
+      document.getElementById("previewModal").style.display = "none";
+    }
+
+    // cerrar con ESC
+    document.addEventListener("keydown", function(e) {
+      if (e.key === "Escape") {
+        cerrarPreview();
+      }
+    });
+  </script>
+
+</body>
+</html>
+

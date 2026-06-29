@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Notificaciones</title>
+
+<style>
+
+body{
+background:#020617;
+color:white;
+font-family:Arial,sans-serif;
+padding:40px;
+max-width:1200px;
+margin:auto;
+}
+
+.grid{
+display:grid;
+grid-template-columns:repeat(4,1fr);
+gap:20px;
+margin-bottom:30px;
+}
+
+.card{
+background:#111827;
+padding:25px;
+border-radius:15px;
+text-align:center;
+}
+
+.card h2{
+margin:10px 0;
+font-size:36px;
+}
+
+.card p{
+color:#9ca3af;
+margin:0;
+}
+
+input,textarea{
+width:100%;
+padding:12px;
+margin-top:8px;
+margin-bottom:20px;
+border:none;
+border-radius:10px;
+background:#111827;
+color:white;
+}
+
+button{
+background:#facc15;
+color:black;
+border:none;
+padding:12px 20px;
+border-radius:10px;
+font-weight:bold;
+cursor:pointer;
+}
+
+a{
+color:#38bdf8;
+text-decoration:none;
+}
+
+.topmenu{
+display:flex;
+gap:25px;
+margin-bottom:30px;
+flex-wrap:wrap;
+}
+
+.topmenu a{
+color:#38bdf8;
+text-decoration:none;
+font-weight:bold;
+}
+
+.topmenu a:hover{
+color:#facc15;
+}
+
+</style>
+
+</head>
+<body>
+
+<div class="topmenu">
+
+<a href="/admin">📊 Dashboard</a>
+
+<a href="/admin/albums">📸 Albums</a>
+
+<a href="/admin/pagos">💰 Pagos</a>
+
+<a href="/admin/instalaciones">📱 Instalaciones</a>
+
+<a href="/admin/notificaciones">🔔 Notificaciones</a>
+
+<a href="/admin/logout">🚪 Salir</a>
+
+</div>
+
+<h1>🔔 Notificaciones Push</h1>
+
+<div class="grid">
+
+<div class="card">
+<h2>🍎 {{ iphone }}</h2>
+<p>iPhone</p>
+</div>
+
+<div class="card">
+<h2>🤖 {{ android }}</h2>
+<p>Android</p>
+</div>
+
+<div class="card">
+<h2>💻 {{ desktop }}</h2>
+<p>Computadoras</p>
+</div>
+
+<div class="card">
+<h2>📡 {{ total }}</h2>
+<p>Total registrados</p>
+</div>
+
+<div class="card">
+<h2>🚀 {{ enviadas }}</h2>
+<p>Enviadas</p>
+</div>
+
+<div class="card">
+<h2>👆 {{ abiertas }}</h2>
+<p>Abiertas</p>
+</div>
+
+</div>
+
+<form method="POST" action="/admin/send-notification">
+
+<label>Título</label>
+
+<input
+name="titulo"
+type="text"
+placeholder="Nuevo evento disponible"
+required
+>
+
+<label>Mensaje</label>
+
+<textarea
+name="mensaje"
+rows="4"
+placeholder="Ya puedes buscar tus fotografías oficiales"
+required
+></textarea>
+
+<label>URL</label>
+
+<input
+name="url"
+type="text"
+value="https://app.luciernaga.site"
+>
+
+<button type="submit">
+🚀 Enviar notificación
+</button>
+
+</form>
+
+<br>
+
+<a href="/admin">
+⬅ Volver al Dashboard
+</a>
+
+</body>
+</html>
