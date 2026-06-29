@@ -22,6 +22,7 @@ from datetime import datetime
 from flask import request, jsonify
 import json
 from pywebpush import webpush
+from config import *
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 Image.MAX_IMAGE_PIXELS = None
@@ -48,9 +49,9 @@ app.config['MAIL_PASSWORD'] = os.getenv("MAIL_PASSWORD")
 
 mail = Mail(app)
 
-app.secret_key = "luciernaga_super_secret_key"
+app.secret_key = SECRET_KEY
 
-app.config['MAX_CONTENT_LENGTH'] = 15 * 1024 * 1024 * 1024
+app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 
 app.config.update(
     SESSION_COOKIE_SECURE=True,
@@ -68,19 +69,6 @@ def datetimeformat(value):
     except:
         return value
 
-ROSTROS_PATH = "/var/www/maraton_fotos/backend/data/rostros"
-# ==========================
-# CONFIG
-# ==========================
-PRECIO_FOTO = 100.0
-DESCARGA_HORAS = 48
-
-BASE_ALBUMS_PATH = "/var/www/maraton_fotos/backend/static/fotos_evento"
-ALBUMS_JSON = "/var/www/maraton_fotos/backend/data/albums.json"
-
-ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png"}
-MAX_PREVIEW_SIZE = 1600
-WATERMARK_PATH = "/var/www/maraton_fotos/backend/static/watermark/logo.png"
 
 # ==========================
 # HELPERS
